@@ -12,12 +12,10 @@ const TUYA_PASSWORD = process.env.TUYA_PASSWORD;
 // Config Govee
 const GOVEE_API_KEY = process.env.GOVEE_API_KEY;
 
-// Table d'équivalence des noms vers ID Tuya
+// Table d'équivalence des noms vers ID Tuya (Appareils hors éclairage)
 const TUYA_DEVICES = {
   "ventilateur salon": "bf284813589a81da12g6s4",
   "ventilateur chambre": "bf316a3a4130ed8e4ahwya",
-  "spot cuisine": "bf1234567890abc1", // Remplacer par tes vrais IDs Tuya si besoin
-  "spot couloir": "bf1234567890abc2",
   "tele": "bf1234567890abc3",
   "ampli": "bf1234567890abc4"
 };
@@ -28,19 +26,24 @@ async function controlGoveeDevice(deviceName, turnOn) {
     throw new Error("GOVEE_API_KEY non configurée sur Render.");
   }
 
-  // 1. Récupération des appareils enregistrés sur ton compte Govee
+  // 1. Récupération des appareils enregistrés sur le compte Govee
   const listRes = await axios.get("https://developer-api.govee.com/v1/devices", {
     headers: { "Govee-API-Key": GOVEE_API_KEY }
   });
 
   const devices = listRes.data?.data?.devices || [];
-  const target = devices.find(d => d.deviceName.toLowerCase().includes(deviceName.toLowerCase()));
+  
+  // Recherche souple du nom d'appareil dans la liste Govee
+  const target = devices.find(d => 
+    d.deviceName.toLowerCase().includes(deviceName.toLowerCase()) ||
+    deviceName.toLowerCase().includes(d.deviceName.toLowerCase())
+  );
 
   if (!target) {
-    throw new Error(`Appareil Govee '${deviceName}' non trouvé dans l'application.`);
+    throw new Error(`Appareil Govee '${deviceName}' non trouvé dans l'application Govee.`);
   }
 
-  // 2. Envoi de la commande ON/OFF
+  // 2. Envoi de la commande ON/OFF à l'API Govee
   const controlRes = await axios.put(
     "https://developer-api.govee.com/v1/devices/control",
     {
@@ -67,7 +70,7 @@ server.setRequestHandler("tools/list", async () => ({
   tools: [
     {
       name: "control_tuya_device",
-      description: "Contrôle les appareils Tuya / SmartLife (Ventilateurs, Spot cuisine, Spot couloir, Télé, Ampli)",
+      description: "Contrôle uniquement les appareils Tuya / SmartLife (Ventilateur salon, Ventilateur chambre, Télévision, Ampli)",
       inputSchema: {
         type: "object",
         properties: {
@@ -79,11 +82,11 @@ server.setRequestHandler("tools/list", async () => ({
     },
     {
       name: "control_govee_device",
-      description: "Contrôle les lumières et rubans LED Govee (Lumiere cuisine, Lumiere couloir, Led salon)",
+      description: "Contrôle TOUS les éclairages, lumières, spots et rubans LED Govee (Lumiere cuisine, Lumiere couloir, Led salon, spot cuisine, spot couloir)",
       inputSchema: {
         type: "object",
         properties: {
-          device_name: { type: "string", enum: ["lumiere cuisine", "lumiere couloir", "led salon"] },
+          device_name: { type: "string" },
           action: { type: "string", enum: ["on", "off"] }
         },
         required: ["device_name", "action"]
@@ -98,12 +101,12 @@ server.setRequestHandler("tools/call", async (request) => {
   if (name === "control_govee_device") {
     const turnOn = args.action === "on";
     await controlGoveeDevice(args.device_name, turnOn);
-    return { content: [{ type: "text", text: `Appareil Govee ${args.device_name} ${turnOn ? 'allumé' : 'éteint'}.` }] };
+    return { content: [{ type: "text", text: `Appareil Govee '${args.device_name}' ${turnOn ? 'allumé' : 'éteint'}.` }] };
   }
 
   if (name === "control_tuya_device") {
-    // Logique Tuya existante...
-    return { content: [{ type: "text", text: `Commande Tuya exécutée pour ${args.device_name}.` }] };
+    // Logique Tuya existante pour ventilateurs, télé, ampli...
+    return { content: [{ type: "text", text: `Commande Tuya exécutée pour '${args.device_name}'.` }] };
   }
 
   throw new Error(`Tool inconnu : ${name}`);
