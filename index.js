@@ -13,7 +13,7 @@ const tuya = new TuyaContext({
   secretKey: process.env.TUYA_SECRET,
 });
 
-// Table des appareils avec ton ID virtuel pour le ventilateur du salon
+// Table des appareils
 const DEVICE_IDS = {
   'Télé': 'ID_TELE',
   'Ampli': 'ID_AMPLI',
@@ -44,7 +44,7 @@ function connect() {
     try {
       const msg = JSON.parse(data.toString());
 
-      // Initialisation du protocole MCP
+      // Handshake MCP
       if (msg.method === 'initialize') {
         ws.send(JSON.stringify({
           jsonrpc: '2.0',
@@ -56,21 +56,15 @@ function connect() {
           }
         }));
       } 
-      // Validation de l'initialisation
       else if (msg.method === 'notifications/initialized') {
         // Handshake OK
       }
-      // Pings de maintien
       else if (msg.method === 'ping') {
         if (msg.id !== undefined) {
-          ws.send(JSON.stringify({
-            jsonrpc: '2.0',
-            id: msg.id,
-            result: {}
-          }));
+          ws.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: {} }));
         }
       }
-      // Liste des outils
+      // Declaration des outils
       else if (msg.method === 'tools/list') {
         ws.send(JSON.stringify({
           jsonrpc: '2.0',
@@ -78,13 +72,13 @@ function connect() {
           result: {
             tools: [{
               name: 'control_tuya_device',
-              description: 'Pilote les équipements domotiques de l\'appartement',
+              description: 'Pilote les équipements domotiques de l\'appartement (Télé, Ampli, Ruban, Ventilateur salon, Ventilateur chambre, Spot cuisine, Spot couloir)',
               inputSchema: {
                 type: 'object',
                 properties: {
                   device_name: {
                     type: 'string',
-                    enum: Object.keys(DEVICE_IDS)
+                    description: 'Nom exact de l\'appareil à piloter'
                   },
                   state: { type: 'string', enum: ['on', 'off'] }
                 },
@@ -94,40 +88,53 @@ function connect() {
           }
         }));
       } 
-      // Appel de l'outil domotique
+      // Executer l'outil
       else if (msg.method === 'tools/call' && msg.params?.name === 'control_tuya_device') {
         const { device_name, state } = msg.params.arguments;
-        const deviceId = DEVICE_IDS[device_name];
+        
+        const matchedKey = Object.keys(DEVICE_IDS).find(
+          k => k.toLowerCase() === device_name?.toLowerCase()
+        ) || device_name;
 
-        console.log(`Ordre reçu : ${device_name} -> ${state} (ID: ${deviceId})`);
+        const deviceId = DEVICE_IDS[matchedKey];
+        const isTurnOn = state === 'on';
+
+        console.log(`Ordre exécuté : ${matchedKey} -> ${state} (ID: ${deviceId})`);
 
         let resultText = '';
 
         if (!deviceId || deviceId.startsWith('ID_')) {
-          resultText = `Erreur : l'ID Tuya pour ${device_name} n'est pas configuré.`;
+          resultText = `Erreur : l'ID Tuya pour ${matchedKey} n'est pas configuré.`;
         } else {
           try {
-            const response = await tuya.request({
-              path: `/v1.0/devices/${deviceId}/commands`,
-              method: 'POST',
-              body: {
-                commands: [
-                  { code: 'switch_1', value: state === 'on' }
-                ]
+            // Test des codes spécifiques aux douilles/ampoules/prises Tuya
+            const possibleCodes = ['switch_led', 'switch', 'switch_1', 'light'];
+            let success = false;
+            let response = null;
+
+            for (const code of possibleCodes) {
+              response = await tuya.request({
+                path: `/v1.0/devices/${deviceId}/commands`,
+                method: 'POST',
+                body: { commands: [{ code: code, value: isTurnOn }] }
+              });
+
+              console.log(`Essai Tuya (${code}) :`, JSON.stringify(response));
+
+              if (response && response.success) {
+                success = true;
+                break;
               }
-            });
+            }
 
-            console.log('Réponse Tuya :', JSON.stringify(response));
-
-            if (response && response.success) {
-              resultText = `C'est fait, le ${device_name} est ${state === 'on' ? 'allumé' : 'éteint'}.`;
+            if (success) {
+              resultText = `C'est fait, le ${matchedKey} est ${isTurnOn ? 'allumé' : 'éteint'}.`;
             } else {
-              console.error('Échec Tuya API :', response);
-              resultText = `Impossible d'actionner le ${device_name}.`;
+              resultText = `Impossible d'actionner le ${matchedKey}.`;
             }
           } catch (tuyaErr) {
             console.error('Erreur Tuya catch :', tuyaErr);
-            resultText = `Erreur lors de la commande du ${device_name}.`;
+            resultText = `Erreur lors de la commande du ${matchedKey}.`;
           }
         }
 
