@@ -7,12 +7,12 @@ const WebSocket = require('ws');
 const port = process.env.PORT || 10000;
 http.createServer((req, res) => res.end('OK')).listen(port);
 
-// Nettoyage strict des variables d'environnement
+// Nettoyage des variables
 const CLIENT_ID = (process.env.TUYA_CLIENT_ID || '').trim().replace(/['"]/g, '');
 const SECRET = (process.env.TUYA_SECRET || '').trim().replace(/['"]/g, '');
 const XIAOZHI_URL = (process.env.XIAOZHI_MCP_URL || '').trim();
 
-// Table des appareils actuellement EN LIGNE
+// Table des appareils
 const DEVICE_IDS = {
   'Ventilateur salon': 'bf09710e9bb5de233dfltn',
   'Neon salon': 'bfe70cfada2d079843d2sm',
@@ -21,18 +21,20 @@ const DEVICE_IDS = {
   'Ventilateur chambre': 'bf6cedea4ebc7d8f5eh9di'
 };
 
-// Génération de signature Tuya v1.0
-function calcSign(clientId, secret, timestamp, accessToken = '', nonce = '') {
-  const str = clientId + accessToken + timestamp + nonce;
+// Signature Tuya officielle v2.0
+function calcSign(clientId, secret, timestamp, accessToken = '', method = 'GET', url = '/v1.0/token?grant_type=1', body = '') {
+  const contentHash = crypto.createHash('sha256').update(body).digest('hex');
+  const stringToSign = [method, contentHash, '', url].join('\n');
+  const str = clientId + accessToken + timestamp + stringToSign;
   return crypto.createHmac('sha256', secret).update(str).digest('hex').toUpperCase();
 }
 
-// Fonction pour récupérer un Access Token
 async function getTuyaToken(baseUrl) {
   const timestamp = Date.now().toString();
-  const sign = calcSign(CLIENT_ID, SECRET, timestamp);
+  const path = '/v1.0/token?grant_type=1';
+  const sign = calcSign(CLIENT_ID, SECRET, timestamp, '', 'GET', path, '');
 
-  const res = await axios.get(`${baseUrl}/v1.0/token?grant_type=1`, {
+  const res = await axios.get(`${baseUrl}${path}`, {
     headers: {
       'client_id': CLIENT_ID,
       'sign': sign,
@@ -44,10 +46,9 @@ async function getTuyaToken(baseUrl) {
   if (res.data && res.data.success) {
     return res.data.result.access_token;
   }
-  throw new Error(`Erreur Token Tuya (${res.data.code}): ${res.data.msg}`);
+  throw new Error(`Token Tuya (${res.data.code}): ${res.data.msg}`);
 }
 
-// Envoi de commande à un appareil Tuya
 async function sendTuyaCommand(deviceId, isTurnOn) {
   const endpoints = [
     'https://openapi.tuyaeu.com',
@@ -64,27 +65,22 @@ async function sendTuyaCommand(deviceId, isTurnOn) {
 
       for (const code of possibleCodes) {
         const timestamp = Date.now().toString();
-        const bodyStr = JSON.stringify({ commands: [{ code: code, value: isTurnOn }] });
-        
-        // Calculation de la signature pour la requête POST
-        const contentHash = crypto.createHash('sha256').update(bodyStr).digest('hex');
-        const stringToSign = ['POST', contentHash, '', `/v1.0/devices/${deviceId}/commands`].join('\n');
-        const signStr = CLIENT_ID + token + timestamp + stringToSign;
-        const sign = crypto.createHmac('sha256', SECRET).update(signStr).digest('hex').toUpperCase();
+        const path = `/v1.0/devices/${deviceId}/commands`;
+        const bodyObj = { commands: [{ code: code, value: isTurnOn }] };
+        const bodyStr = JSON.stringify(bodyObj);
 
-        const cmdRes = await axios.post(`${baseUrl}/v1.0/devices/${deviceId}/commands`, 
-          { commands: [{ code: code, value: isTurnOn }] },
-          {
-            headers: {
-              'client_id': CLIENT_ID,
-              'access_token': token,
-              'sign': sign,
-              't': timestamp,
-              'sign_method': 'HMAC-SHA256',
-              'Content-Type': 'application/json'
-            }
+        const sign = calcSign(CLIENT_ID, SECRET, timestamp, token, 'POST', path, bodyStr);
+
+        const cmdRes = await axios.post(`${baseUrl}${path}`, bodyObj, {
+          headers: {
+            'client_id': CLIENT_ID,
+            'access_token': token,
+            'sign': sign,
+            't': timestamp,
+            'sign_method': 'HMAC-SHA256',
+            'Content-Type': 'application/json'
           }
-        );
+        });
 
         console.log(`Réponse Tuya (${code}) :`, cmdRes.data);
         if (cmdRes.data && cmdRes.data.success) {
@@ -98,7 +94,6 @@ async function sendTuyaCommand(deviceId, isTurnOn) {
   return false;
 }
 
-// Boucle principale WebSocket pour Xiaozhi MCP
 function connect() {
   if (!XIAOZHI_URL) {
     console.error("Variable XIAOZHI_MCP_URL manquante !");
