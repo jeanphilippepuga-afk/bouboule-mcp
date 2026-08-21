@@ -39,13 +39,33 @@ function connect() {
   });
 
   ws.on('message', async (data) => {
-    // Journal de suivi pour voir le moindre message reçu de Xiaozhi
     console.log('Message reçu de Xiaozhi :', data.toString());
 
     try {
       const msg = JSON.parse(data.toString());
 
-      if (msg.method === 'tools/list') {
+      // Handshake d'initialisation du protocole MCP
+      if (msg.method === 'initialize') {
+        ws.send(JSON.stringify({
+          jsonrpc: '2.0',
+          id: msg.id,
+          result: {
+            protocolVersion: '2024-11-05',
+            capabilities: { tools: {} },
+            serverInfo: { name: 'bouboule-mcp-bridge', version: '1.0.0' }
+          }
+        }));
+      } 
+      // Réponse aux pings de maintien de connexion
+      else if (msg.method === 'ping') {
+        ws.send(JSON.stringify({
+          jsonrpc: '2.0',
+          id: msg.id,
+          result: {}
+        }));
+      }
+      // Liste des outils disponibles
+      else if (msg.method === 'tools/list') {
         ws.send(JSON.stringify({
           jsonrpc: '2.0',
           id: msg.id,
@@ -67,7 +87,9 @@ function connect() {
             }]
           }
         }));
-      } else if (msg.method === 'tools/call' && msg.params?.name === 'control_tuya_device') {
+      } 
+      // Exécution des commandes domotiques
+      else if (msg.method === 'tools/call' && msg.params?.name === 'control_tuya_device') {
         const { device_name, state } = msg.params.arguments;
         const deviceId = DEVICE_IDS[device_name];
 
@@ -77,7 +99,6 @@ function connect() {
           resultText = `Erreur : l'ID Tuya pour ${device_name} n'est pas configuré.`;
         } else {
           try {
-            // Envoi des commandes switch_1 et switch
             const response = await tuya.request({
               path: `/v1.0/devices/${deviceId}/commands`,
               method: 'POST',
