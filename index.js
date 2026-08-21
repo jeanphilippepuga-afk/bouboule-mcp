@@ -41,14 +41,24 @@ function normalizeText(text) {
 
 // --- 4. Fonctions Tuya & Govee ---
 async function getTuyaToken() {
+  if (!TUYA_CLIENT_ID || !TUYA_SECRET) {
+    throw new Error("Clés TUYA_CLIENT_ID ou TUYA_SECRET manquantes.");
+  }
+
   const t = Date.now().toString();
   const stringToSign = ["GET", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "", "/v1.0/token?grant_type=1"].join("\n");
-  const signStr = TUYA_CLIENT_ID + t + "" + stringToSign;
+  const signStr = TUYA_CLIENT_ID + t + stringToSign;
   const sign = crypto.createHmac("sha256", TUYA_SECRET).update(signStr).digest("HEX").toUpperCase();
 
   const res = await axios.get("https://openapi.tuyaeu.com/v1/token?grant_type=1", {
     headers: { client_id: TUYA_CLIENT_ID, sign, t, sign_method: "HMAC-SHA256" }
   });
+
+  if (!res.data?.success) {
+    console.error("Détail erreur Tuya :", JSON.stringify(res.data));
+    throw new Error(`Tuya [code ${res.data?.code}] : ${res.data?.msg}`);
+  }
+
   return res.data?.result?.access_token;
 }
 
@@ -60,7 +70,7 @@ async function controlTuyaDevice(deviceId, turnOn) {
   const body = JSON.stringify({ commands: [{ code: "switch_1", value: turnOn }] });
   const contentSha256 = crypto.createHash("sha256").update(body).digest("hex");
   const stringToSign = ["POST", contentSha256, "", `/v1.0/devices/${deviceId}/commands`].join("\n");
-  const signStr = TUYA_CLIENT_ID + token + t + "" + stringToSign;
+  const signStr = TUYA_CLIENT_ID + token + t + stringToSign;
   const sign = crypto.createHmac("sha256", TUYA_SECRET).update(signStr).digest("HEX").toUpperCase();
 
   const res = await axios.post(
@@ -77,6 +87,12 @@ async function controlTuyaDevice(deviceId, turnOn) {
       }
     }
   );
+
+  if (!res.data?.success) {
+    console.error("Détail erreur commande Tuya :", JSON.stringify(res.data));
+    throw new Error(`Tuya commande [code ${res.data?.code}] : ${res.data?.msg}`);
+  }
+
   return res.data;
 }
 
@@ -127,7 +143,6 @@ function connectWebSocket() {
     console.log("Connecté au serveur MCP Xiaozhi !");
   });
 
-  // C'EST CETTE PARTIE QUE J'AVAIS SUPPRIMÉE À TORT !
   ws.on("message", async (data) => {
     try {
       const msg = JSON.parse(data);
@@ -135,13 +150,11 @@ function connectWebSocket() {
       
       console.log(`Message reçu de Xiaozhi (méthode): ${msg.method}`);
 
-      // 1. Xiaozhi vérifie qu'on est en ligne (empêche la coupure des 30s)
       if (msg.method === "ping") {
         ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: {} }));
         return;
       }
 
-      // 2. Xiaozhi initialise la connexion
       if (msg.method === "initialize") {
         ws.send(JSON.stringify({
           jsonrpc: "2.0",
@@ -155,7 +168,6 @@ function connectWebSocket() {
         return;
       }
 
-      // 3. Xiaozhi demande la liste des outils
       if (msg.method === "tools/list") {
         ws.send(JSON.stringify({
           jsonrpc: "2.0",
@@ -180,7 +192,6 @@ function connectWebSocket() {
         return;
       }
 
-      // 4. Xiaozhi donne un ordre (allumer/éteindre)
       if (msg.method === "tools/call") {
         const args = msg.params?.arguments || {};
         const rawDevice = args.device_name || "";
@@ -191,14 +202,12 @@ function connectWebSocket() {
 
         try {
           let matched = "";
-          // Test Govee en premier si c'est de la lumière spécifique
           if (cleanName.includes("couloir") || cleanName.includes("cuisine") || cleanName.includes("spot") || cleanName.includes("govee")) {
             matched = await controlGoveeDevice(rawDevice, isTurnOn);
             ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: `Govee '${matched}' OK` }] } }));
             return;
           }
 
-          // Test Tuya (ce qui inclut ton ventilateur salon)
           const deviceId = TUYA_DEVICES[cleanName];
           if (deviceId) {
             await controlTuyaDevice(deviceId, isTurnOn);
@@ -206,7 +215,6 @@ function connectWebSocket() {
             return;
           }
 
-          // Dernier essai Govee si non trouvé dans Tuya
           matched = await controlGoveeDevice(rawDevice, isTurnOn);
           ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: `Govee '${matched}' OK` }] } }));
 
