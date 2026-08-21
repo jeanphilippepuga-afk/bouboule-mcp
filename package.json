@@ -6,7 +6,7 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "@tuya/tuya-connector-nodejs": "^1.0.7",
+    "@tuya/tuya-connector-nodejs": "^1.0.1",
     "ws": "^8.18.0"
   }
 }
