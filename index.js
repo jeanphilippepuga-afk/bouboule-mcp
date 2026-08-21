@@ -1,23 +1,21 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import WebSocket from "ws";
 import axios from "axios";
 import crypto from "crypto";
 import http from "http";
 
-// Serveur HTTP pour maintenir Render actif
+// --- 1. Serveur HTTP pour maintenir Render actif ---
 const PORT = process.env.PORT || 10000;
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
   res.end("MCP Server OK\n");
 }).listen(PORT, () => console.log(`Serveur HTTP actif sur le port ${PORT}`));
 
-// Variables d'environnement
+// --- 2. Variables d'environnement ---
 const TUYA_CLIENT_ID = process.env.TUYA_CLIENT_ID;
 const TUYA_SECRET = process.env.TUYA_SECRET;
 const GOVEE_API_KEY = process.env.GOVEE_API_KEY;
 
-// Dictionnaire des appareils Tuya
+// --- 3. Dictionnaire complet des appareils Tuya ---
 const TUYA_DEVICES = {
   "musique": "bff13ef303c235bff5ctrs",
   "hifi": "bff13ef303c235bff5ctrs",
@@ -38,12 +36,10 @@ const TUYA_DEVICES = {
 
 function normalizeText(text) {
   if (!text) return "";
-  return text
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+  return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
+// --- 4. Fonctions Tuya & Govee ---
 async function getTuyaToken() {
   const t = Date.now().toString();
   const stringToSign = ["GET", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "", "/v1.0/token?grant_type=1"].join("\n");
@@ -104,7 +100,7 @@ async function controlGoveeDevice(deviceName, turnOn) {
 
   if (!target) {
     const names = devices.map(d => d.deviceName).join(", ");
-    throw new Error(`Non trouvé sur Govee. Appareils dispo : [${names}]`);
+    throw new Error(`Non trouvé sur Govee. Dispo: [${names}]`);
   }
 
   await axios.put(
@@ -120,60 +116,7 @@ async function controlGoveeDevice(deviceName, turnOn) {
   return target.deviceName;
 }
 
-const server = new Server(
-  { name: "bouboule-mcp", version: "1.0.0" },
-  { capabilities: { tools: {} } }
-);
-
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [
-    {
-      name: "control_device",
-      description: "Contrôle les appareils domotiques (musique, hifi, neon, ampli, tele, couloir, cuisine, spot, ventilateur, chevet).",
-      inputSchema: {
-        type: "object",
-        properties: {
-          device_name: { type: "string" },
-          action: { type: "string", enum: ["on", "off"] },
-          state: { type: "string", enum: ["on", "off"] }
-        },
-        required: ["device_name"]
-      }
-    }
-  ]
-}));
-
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  try {
-    const args = request.params.arguments || {};
-    const rawDevice = args.device_name || "";
-    const cleanName = normalizeText(rawDevice);
-    const isTurnOn = (args.action === "on" || args.state === "on" || args.action === "allumer" || args.state === "allumer");
-
-    console.log(`Ordre reçu pour : '${rawDevice}' (Action: ${isTurnOn ? 'ON' : 'OFF'})`);
-
-    if (cleanName.includes("couloir") || cleanName.includes("cuisine") || cleanName.includes("spot") || cleanName.includes("govee")) {
-      const matched = await controlGoveeDevice(rawDevice, isTurnOn);
-      return { content: [{ type: "text", text: `Govee '${matched}' ${isTurnOn ? 'allumé' : 'éteint'}.` }] };
-    }
-
-    const deviceId = TUYA_DEVICES[cleanName];
-    if (deviceId) {
-      await controlTuyaDevice(deviceId, isTurnOn);
-      return { content: [{ type: "text", text: `Tuya '${rawDevice}' ${isTurnOn ? 'allumé' : 'éteint'}.` }] };
-    }
-
-    const matched = await controlGoveeDevice(rawDevice, isTurnOn);
-    return { content: [{ type: "text", text: `Govee '${matched}' ${isTurnOn ? 'allumé' : 'éteint'}.` }] };
-
-  } catch (err) {
-    console.error("Erreur commande :", err.message);
-    return { content: [{ type: "text", text: `Ça coince : ${err.message}` }], isError: true };
-  }
-});
-
-let pingInterval = null;
-
+// --- 5. Connexion WebSocket avec Xiaozhi ---
 function connectWebSocket() {
   const wsUrl = process.env.XIAOZHI_MCP_URL;
   if (!wsUrl) return;
@@ -182,33 +125,105 @@ function connectWebSocket() {
 
   ws.on("open", () => {
     console.log("Connecté au serveur MCP Xiaozhi !");
-    if (pingInterval) clearInterval(pingInterval);
+  });
 
-    // Initialisation du protocole MCP
-    ws.send(JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        clientInfo: { name: "bouboule-mcp", version: "1.0.0" }
-      }
-    }));
+  // C'EST CETTE PARTIE QUE J'AVAIS SUPPRIMÉE À TORT !
+  ws.on("message", async (data) => {
+    try {
+      const msg = JSON.parse(data);
+      if (!msg.method) return;
+      
+      console.log(`Message reçu de Xiaozhi (méthode): ${msg.method}`);
 
-    // Envoi d'un ping JSON-RPC toutes les 10 secondes
-    pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ jsonrpc: "2.0", method: "ping", params: {} }));
+      // 1. Xiaozhi vérifie qu'on est en ligne (empêche la coupure des 30s)
+      if (msg.method === "ping") {
+        ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: {} }));
+        return;
       }
-    }, 10000);
+
+      // 2. Xiaozhi initialise la connexion
+      if (msg.method === "initialize") {
+        ws.send(JSON.stringify({
+          jsonrpc: "2.0",
+          id: msg.id,
+          result: {
+            protocolVersion: "2024-11-05",
+            capabilities: {},
+            serverInfo: { name: "bouboule-mcp", version: "1.0.0" }
+          }
+        }));
+        return;
+      }
+
+      // 3. Xiaozhi demande la liste des outils
+      if (msg.method === "tools/list") {
+        ws.send(JSON.stringify({
+          jsonrpc: "2.0",
+          id: msg.id,
+          result: {
+            tools: [
+              {
+                name: "control_device",
+                description: "Contrôle les appareils domotiques",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    device_name: { type: "string" },
+                    state: { type: "string", enum: ["on", "off"] }
+                  },
+                  required: ["device_name"]
+                }
+              }
+            ]
+          }
+        }));
+        return;
+      }
+
+      // 4. Xiaozhi donne un ordre (allumer/éteindre)
+      if (msg.method === "tools/call") {
+        const args = msg.params?.arguments || {};
+        const rawDevice = args.device_name || "";
+        const cleanName = normalizeText(rawDevice);
+        const isTurnOn = (args.state === "on" || args.state === "allumer");
+
+        console.log(`Ordre en cours pour : '${rawDevice}' -> ${isTurnOn ? 'ON' : 'OFF'}`);
+
+        try {
+          let matched = "";
+          // Test Govee en premier si c'est de la lumière spécifique
+          if (cleanName.includes("couloir") || cleanName.includes("cuisine") || cleanName.includes("spot") || cleanName.includes("govee")) {
+            matched = await controlGoveeDevice(rawDevice, isTurnOn);
+            ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: `Govee '${matched}' OK` }] } }));
+            return;
+          }
+
+          // Test Tuya (ce qui inclut ton ventilateur salon)
+          const deviceId = TUYA_DEVICES[cleanName];
+          if (deviceId) {
+            await controlTuyaDevice(deviceId, isTurnOn);
+            ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: `Tuya '${rawDevice}' OK` }] } }));
+            return;
+          }
+
+          // Dernier essai Govee si non trouvé dans Tuya
+          matched = await controlGoveeDevice(rawDevice, isTurnOn);
+          ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: `Govee '${matched}' OK` }] } }));
+
+        } catch (err) {
+          console.error("Erreur commande :", err.message);
+          ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: `Erreur: ${err.message}` }], isError: true } }));
+        }
+      }
+    } catch (e) {
+      console.error("Erreur de traitement WS :", e.message);
+    }
   });
 
   ws.on("error", (err) => console.error("Erreur WS :", err.message));
 
   ws.on("close", () => {
     console.log("WebSocket fermé. Reconnexion dans 5 secondes...");
-    if (pingInterval) clearInterval(pingInterval);
     setTimeout(connectWebSocket, 5000);
   });
 }
