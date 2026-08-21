@@ -6,11 +6,15 @@ const { TuyaContext } = require('@tuya/tuya-connector-nodejs');
 const port = process.env.PORT || 10000;
 http.createServer((req, res) => res.end('OK')).listen(port);
 
-// Connexion API Tuya Cloud (Region Central Europe)
+// Nettoyage rigoureux des clés d'API (supprime espaces et guillemets fortuits)
+const clientId = (process.env.TUYA_CLIENT_ID || '').replace(/['"\s]/g, '');
+const secretKey = (process.env.TUYA_SECRET || '').replace(/['"\s]/g, '');
+
+// Connexion API Tuya Cloud (Central Europe)
 const tuya = new TuyaContext({
   baseUrl: 'https://openapi.tuyaeu.com',
-  accessKey: process.env.TUYA_CLIENT_ID?.trim(),
-  secretKey: process.env.TUYA_SECRET?.trim(),
+  accessKey: clientId,
+  secretKey: secretKey,
 });
 
 // Table des appareils actuellement EN LIGNE
