@@ -2,17 +2,16 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { WebSocket } from "ws";
 import axios from "axios";
+import crypto from "crypto";
 
 // Config Tuya
 const TUYA_CLIENT_ID = process.env.TUYA_CLIENT_ID;
 const TUYA_SECRET = process.env.TUYA_SECRET;
-const TUYA_USERNAME = process.env.TUYA_USERNAME;
-const TUYA_PASSWORD = process.env.TUYA_PASSWORD;
 
 // Config Govee
 const GOVEE_API_KEY = process.env.GOVEE_API_KEY;
 
-// VRAIS IDs TUYA (Directement issus de la console Tuya IoT)
+// Table des appareils Tuya
 const TUYA_DEVICES = {
   "ventilateur salon": "bf09710e9bb5de233dfltn",
   "ventilateur chambre": "bf6cedea4ebc7d8f5eh9di",
@@ -27,11 +26,49 @@ const TUYA_DEVICES = {
   "pc": "bf5406yyctvuikg1"
 };
 
-// Fonction de contrôle Govee via API officielle
+// Helper Signature Tuya OpenAPI
+async function getTuyaToken() {
+  const t = Date.now().toString();
+  const nonce = "";
+  const stringToSign = ["GET", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "", "/v1.0/token?grant_type=1"].join("\n");
+  const signStr = TUYA_CLIENT_ID + t + nonce + stringToSign;
+  const sign = crypto.createHmac("sha256", TUYA_SECRET).update(signStr).digest("HEX").toUpperCase();
+
+  const res = await axios.get("https://openapi.tuyaeu.com/v1/token?grant_type=1", {
+    headers: { client_id: TUYA_CLIENT_ID, sign, t, sign_method: "HMAC-SHA256" }
+  });
+  return res.data?.result?.access_token;
+}
+
+async function controlTuyaDevice(deviceId, turnOn) {
+  const token = await getTuyaToken();
+  const t = Date.now().toString();
+  const body = JSON.stringify({ commands: [{ code: "switch_led", value: turnOn }, { code: "switch_1", value: turnOn }] });
+  const contentSha256 = crypto.createHash("sha256").update(body).digest("hex");
+  const stringToSign = ["POST", contentSha256, "", `/v1.0/devices/${deviceId}/commands`].join("\n");
+  const signStr = TUYA_CLIENT_ID + token + t + "" + stringToSign;
+  const sign = crypto.createHmac("sha256", TUYA_SECRET).update(signStr).digest("HEX").toUpperCase();
+
+  const res = await axios.post(
+    `https://openapi.tuyaeu.com/v1/devices/${deviceId}/commands`,
+    body,
+    {
+      headers: {
+        client_id: TUYA_CLIENT_ID,
+        access_token: token,
+        sign,
+        t,
+        sign_method: "HMAC-SHA256",
+        "Content-Type": "application/json"
+      }
+    }
+  );
+  return res.data;
+}
+
+// Fonction de contrôle Govee
 async function controlGoveeDevice(deviceName, turnOn) {
-  if (!GOVEE_API_KEY) {
-    throw new Error("GOVEE_API_KEY non configurée sur Render.");
-  }
+  if (!GOVEE_API_KEY) throw new Error("GOVEE_API_KEY manquante.");
 
   const listRes = await axios.get("https://developer-api.govee.com/v1/devices", {
     headers: { "Govee-API-Key": GOVEE_API_KEY }
@@ -43,10 +80,11 @@ async function controlGoveeDevice(deviceName, turnOn) {
   const target = devices.find(d => d.deviceName.toLowerCase().includes(searchKey));
 
   if (!target) {
-    throw new Error(`Appareil Govee introuvable pour '${deviceName}'.`);
+    const listNames = devices.map(d => d.deviceName).join(", ");
+    throw new Error(`Appareil Govee non trouvé pour '${deviceName}'. Appareils dispo sur ton compte : ${listNames}`);
   }
 
-  const controlRes = await axios.put(
+  await axios.put(
     "https://developer-api.govee.com/v1/devices/control",
     {
       device: target.device,
@@ -59,7 +97,7 @@ async function controlGoveeDevice(deviceName, turnOn) {
   return target.deviceName;
 }
 
-// Initialisation MCP
+// Serveur MCP
 const server = new Server(
   { name: "bouboule-mcp", version: "1.0.0" },
   { capabilities: { tools: {} } }
@@ -69,7 +107,7 @@ server.setRequestHandler("tools/list", async () => ({
   tools: [
     {
       name: "control_tuya_device",
-      description: "Contrôle les appareils Tuya/SmartLife suivants : ventilateur salon, ventilateur chambre, neon salon, hifi, television, informatique.",
+      description: "Contrôle UNIQUEMENT : ventilateur salon, ventilateur chambre, neon salon, hifi, television, informatique. STRICTEMENT INTERDIT pour les autres lumières.",
       inputSchema: {
         type: "object",
         properties: {
@@ -81,7 +119,7 @@ server.setRequestHandler("tools/list", async () => ({
     },
     {
       name: "control_govee_device",
-      description: "Contrôle les lumières Govee : Lumiere cuisine, Lumiere couloir, Led salon.",
+      description: "Contrôle TOUS les éclairages Govee : lumière cuisine, lumière couloir, led salon, spots et rubans.",
       inputSchema: {
         type: "object",
         properties: {
@@ -105,16 +143,20 @@ server.setRequestHandler("tools/call", async (request) => {
 
   if (name === "control_tuya_device") {
     const cleanName = args.device_name.toLowerCase();
-    if (!TUYA_DEVICES[cleanName]) {
-      throw new Error(`'${args.device_name}' n'est pas configuré dans la liste Tuya.`);
+    const deviceId = TUYA_DEVICES[cleanName];
+
+    if (!deviceId) {
+      throw new Error(`ERREUR : '${args.device_name}' n'est pas un appareil Tuya validé. Utilise control_govee_device pour les lumières.`);
     }
-    return { content: [{ type: "text", text: `Tuya '${args.device_name}' commandé.` }] };
+
+    await controlTuyaDevice(deviceId, args.action === "on");
+    return { content: [{ type: "text", text: `Tuya '${args.device_name}' commandé avec succès.` }] };
   }
 
   throw new Error(`Tool inconnu : ${name}`);
 });
 
-// Connexion WebSocket
+// WebSocket
 const wsUrl = process.env.XIAOZHI_MCP_URL;
 if (wsUrl) {
   const ws = new WebSocket(wsUrl);
