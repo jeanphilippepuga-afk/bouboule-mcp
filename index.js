@@ -1,4 +1,6 @@
-const WebSocket = require('ws');
+const http = require('http');
+const port = process.env.PORT || 10000;
+http.createServer((req, res) => res.end('OK')).listen(port);const WebSocket = require('ws');
 const url = process.env.XIAOZHI_MCP_URL;
 
 function connect() {
