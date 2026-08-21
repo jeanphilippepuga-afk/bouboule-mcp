@@ -1,27 +1,16 @@
 const http = require('http');
+const crypto = require('crypto');
+const axios = require('axios');
 const WebSocket = require('ws');
-const { TuyaContext } = require('@tuya/tuya-connector-nodejs');
 
 // Mini serveur HTTP pour maintenir Render actif
 const port = process.env.PORT || 10000;
 http.createServer((req, res) => res.end('OK')).listen(port);
 
-// Nettoyage rigoureux des clés d'API (supprime espaces et guillemets fortuits)
-const clientId = (process.env.TUYA_CLIENT_ID || '').replace(/['"\s]/g, '');
-const secretKey = (process.env.TUYA_SECRET || '').replace(/['"\s]/g, '');
-
-// Instances Tuya pour tester les deux endpoints d'Europe
-const tuyaEU = new TuyaContext({
-  baseUrl: 'https://openapi.tuyaeu.com',
-  accessKey: clientId,
-  secretKey: secretKey,
-});
-
-const tuyaCN = new TuyaContext({
-  baseUrl: 'https://openapi.tuyacn.com',
-  accessKey: clientId,
-  secretKey: secretKey,
-});
+// Nettoyage strict des variables d'environnement
+const CLIENT_ID = (process.env.TUYA_CLIENT_ID || '').trim().replace(/['"]/g, '');
+const SECRET = (process.env.TUYA_SECRET || '').trim().replace(/['"]/g, '');
+const XIAOZHI_URL = (process.env.XIAOZHI_MCP_URL || '').trim();
 
 // Table des appareils actuellement EN LIGNE
 const DEVICE_IDS = {
@@ -32,15 +21,91 @@ const DEVICE_IDS = {
   'Ventilateur chambre': 'bf6cedea4ebc7d8f5eh9di'
 };
 
-const url = process.env.XIAOZHI_MCP_URL;
+// Génération de signature Tuya v1.0
+function calcSign(clientId, secret, timestamp, accessToken = '', nonce = '') {
+  const str = clientId + accessToken + timestamp + nonce;
+  return crypto.createHmac('sha256', secret).update(str).digest('hex').toUpperCase();
+}
 
+// Fonction pour récupérer un Access Token
+async function getTuyaToken(baseUrl) {
+  const timestamp = Date.now().toString();
+  const sign = calcSign(CLIENT_ID, SECRET, timestamp);
+
+  const res = await axios.get(`${baseUrl}/v1.0/token?grant_type=1`, {
+    headers: {
+      'client_id': CLIENT_ID,
+      'sign': sign,
+      't': timestamp,
+      'sign_method': 'HMAC-SHA256'
+    }
+  });
+
+  if (res.data && res.data.success) {
+    return res.data.result.access_token;
+  }
+  throw new Error(`Erreur Token Tuya (${res.data.code}): ${res.data.msg}`);
+}
+
+// Envoi de commande à un appareil Tuya
+async function sendTuyaCommand(deviceId, isTurnOn) {
+  const endpoints = [
+    'https://openapi.tuyaeu.com',
+    'https://openapi.tuyacn.com'
+  ];
+
+  const possibleCodes = ['switch_led', 'switch', 'switch_1', 'light'];
+
+  for (const baseUrl of endpoints) {
+    try {
+      console.log(`Tentative obtention Token sur ${baseUrl}...`);
+      const token = await getTuyaToken(baseUrl);
+      console.log(`Token obtenu avec succès !`);
+
+      for (const code of possibleCodes) {
+        const timestamp = Date.now().toString();
+        const bodyStr = JSON.stringify({ commands: [{ code: code, value: isTurnOn }] });
+        
+        // Calculation de la signature pour la requête POST
+        const contentHash = crypto.createHash('sha256').update(bodyStr).digest('hex');
+        const stringToSign = ['POST', contentHash, '', `/v1.0/devices/${deviceId}/commands`].join('\n');
+        const signStr = CLIENT_ID + token + timestamp + stringToSign;
+        const sign = crypto.createHmac('sha256', SECRET).update(signStr).digest('hex').toUpperCase();
+
+        const cmdRes = await axios.post(`${baseUrl}/v1.0/devices/${deviceId}/commands`, 
+          { commands: [{ code: code, value: isTurnOn }] },
+          {
+            headers: {
+              'client_id': CLIENT_ID,
+              'access_token': token,
+              'sign': sign,
+              't': timestamp,
+              'sign_method': 'HMAC-SHA256',
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        console.log(`Réponse Tuya (${code}) :`, cmdRes.data);
+        if (cmdRes.data && cmdRes.data.success) {
+          return true;
+        }
+      }
+    } catch (err) {
+      console.error(`Échec sur ${baseUrl} :`, err.response?.data || err.message);
+    }
+  }
+  return false;
+}
+
+// Boucle principale WebSocket pour Xiaozhi MCP
 function connect() {
-  if (!url) {
+  if (!XIAOZHI_URL) {
     console.error("Variable XIAOZHI_MCP_URL manquante !");
     return;
   }
 
-  const ws = new WebSocket(url);
+  const ws = new WebSocket(XIAOZHI_URL);
 
   ws.on('open', () => {
     console.log('Connecté en continu au serveur MCP Xiaozhi !');
@@ -52,7 +117,6 @@ function connect() {
     try {
       const msg = JSON.parse(data.toString());
 
-      // Handshake MCP
       if (msg.method === 'initialize') {
         ws.send(JSON.stringify({
           jsonrpc: '2.0',
@@ -64,15 +128,9 @@ function connect() {
           }
         }));
       } 
-      else if (msg.method === 'notifications/initialized') {
-        // Handshake OK
+      else if (msg.method === 'ping' && msg.id !== undefined) {
+        ws.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: {} }));
       }
-      else if (msg.method === 'ping') {
-        if (msg.id !== undefined) {
-          ws.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: {} }));
-        }
-      }
-      // Déclaration des outils
       else if (msg.method === 'tools/list') {
         ws.send(JSON.stringify({
           jsonrpc: '2.0',
@@ -84,10 +142,7 @@ function connect() {
               inputSchema: {
                 type: 'object',
                 properties: {
-                  device_name: {
-                    type: 'string',
-                    description: 'Nom exact de l\'appareil'
-                  },
+                  device_name: { type: 'string', description: 'Nom exact de l\'appareil' },
                   state: { type: 'string', enum: ['on', 'off'] }
                 },
                 required: ['device_name', 'state']
@@ -96,10 +151,9 @@ function connect() {
           }
         }));
       } 
-      // Exécution des commandes
       else if (msg.method === 'tools/call' && msg.params?.name === 'control_tuya_device') {
         const { device_name, state } = msg.params.arguments;
-        
+
         const matchedKey = Object.keys(DEVICE_IDS).find(
           k => k.toLowerCase() === device_name?.toLowerCase()
         ) || device_name;
@@ -112,46 +166,13 @@ function connect() {
         let resultText = '';
 
         if (!deviceId) {
-          resultText = `Erreur : l'appareil ${matchedKey} n'est pas reconnu ou est hors ligne.`;
+          resultText = `Erreur : l'appareil ${matchedKey} n'est pas reconnu.`;
         } else {
-          try {
-            const possibleCodes = ['switch_led', 'switch', 'switch_1', 'light'];
-            let success = false;
-            let response = null;
-
-            // Essai avec l'ensemble des clients et des codes
-            const clients = [tuyaEU, tuyaCN];
-
-            for (const client of clients) {
-              for (const code of possibleCodes) {
-                try {
-                  response = await client.request({
-                    path: `/v1.0/devices/${deviceId}/commands`,
-                    method: 'POST',
-                    body: { commands: [{ code: code, value: isTurnOn }] }
-                  });
-
-                  console.log(`Essai Tuya (${code}) :`, JSON.stringify(response));
-
-                  if (response && response.success) {
-                    success = true;
-                    break;
-                  }
-                } catch (err) {
-                  console.log(`Échec sur cet endpoint/code : ${err.message}`);
-                }
-              }
-              if (success) break;
-            }
-
-            if (success) {
-              resultText = `C'est fait, le ${matchedKey} est ${isTurnOn ? 'allumé' : 'éteint'}.`;
-            } else {
-              resultText = `Impossible d'actionner le ${matchedKey}.`;
-            }
-          } catch (tuyaErr) {
-            console.error('Erreur Tuya catch :', tuyaErr);
-            resultText = `Erreur lors de la commande du ${matchedKey}.`;
+          const success = await sendTuyaCommand(deviceId, isTurnOn);
+          if (success) {
+            resultText = `C'est fait, le ${matchedKey} est ${isTurnOn ? 'allumé' : 'éteint'}.`;
+          } else {
+            resultText = `Impossible d'actionner le ${matchedKey}.`;
           }
         }
 
@@ -164,7 +185,7 @@ function connect() {
         }));
       }
     } catch (e) {
-      console.error('Erreur parsing JSON :', e);
+      console.error('Erreur traitement message :', e);
     }
   });
 
