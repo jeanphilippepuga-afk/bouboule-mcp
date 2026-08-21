@@ -68,6 +68,7 @@ async function controlTuyaDevice(deviceId, turnOn) {
 
 // Normalisation texte
 function normalizeText(text) {
+  if (!text) return "";
   return text
     .toLowerCase()
     .normalize("NFD")
@@ -76,7 +77,7 @@ function normalizeText(text) {
 
 // Control Govee
 async function controlGoveeDevice(deviceName, turnOn) {
-  if (!GOVEE_API_KEY) throw new Error("GOVEE_API_KEY manquante.");
+  if (!GOVEE_API_KEY) throw new Error("Clé GOVEE_API_KEY non configurée dans les variables Render.");
 
   const listRes = await axios.get("https://developer-api.govee.com/v1/devices", {
     headers: { "Govee-API-Key": GOVEE_API_KEY }
@@ -95,7 +96,7 @@ async function controlGoveeDevice(deviceName, turnOn) {
 
   if (!target) {
     const listNames = devices.map(d => d.deviceName).join(", ");
-    throw new Error(`Appareil Govee non trouvé pour '${deviceName}'. Appareils Govee disponibles : [${listNames}]`);
+    throw new Error(`Appareil '${deviceName}' non trouvé dans Govee. Appareils disponibles : [${listNames}]`);
   }
 
   await axios.put(
@@ -121,7 +122,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: "control_tuya_device",
-      description: "Contrôle EXCLUSIVEMENT : ventilateur salon, ventilateur chambre, neon salon, hifi, television, informatique. INTERDIT pour les lumières Govee.",
+      description: "Contrôle les équipements Tuya : ventilateur salon, ventilateur chambre, hifi, television, pc.",
       inputSchema: {
         type: "object",
         properties: {
@@ -134,7 +135,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "control_govee_device",
-      description: "Contrôle TOUS les éclairages Govee : Lumière Cuisine, Lumière Couloir, Led salon.",
+      description: "Contrôle les éclairages Govee : Lumière Couloir, Lumière Cuisine, Spot cuisine, Spot couloir, Led salon, Neon.",
       inputSchema: {
         type: "object",
         properties: {
@@ -149,36 +150,51 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-  const cleanName = normalizeText(args.device_name || "");
-  const isTurnOn = (args.action === "on" || args.state === "on");
+  try {
+    const { name, arguments: args } = request.params;
+    const cleanName = normalizeText(args?.device_name || "");
+    const isTurnOn = (args?.action === "on" || args?.state === "on");
 
-  // Sécurité : Refus strict des lumières Govee envoyées sur Tuya
-  if (name === "control_tuya_device") {
-    if (cleanName.includes("couloir") || cleanName.includes("cuisine") || cleanName.includes("lumiere")) {
-      throw new Error(`REFUS : '${args.device_name}' est une lumière Govee ! Tu DOIS obligatoirement appeler l'outil control_govee_device.`);
+    if (name === "control_tuya_device") {
+      if (cleanName.includes("couloir") || cleanName.includes("cuisine") || cleanName.includes("lumiere") || cleanName.includes("spot")) {
+        return {
+          content: [{ type: "text", text: "ERREUR : Il faut utiliser l'outil 'control_govee_device' pour les lumières et spots." }],
+          isError: true
+        };
+      }
+
+      const deviceId = TUYA_DEVICES[cleanName];
+      if (!deviceId) {
+        return {
+          content: [{ type: "text", text: `Appareil Tuya inconnu : '${args.device_name}'. Utilise control_govee_device si c'est une lumière.` }],
+          isError: true
+        };
+      }
+
+      await controlTuyaDevice(deviceId, isTurnOn);
+      return { content: [{ type: "text", text: `Tuya '${args.device_name}' ${isTurnOn ? 'allumé' : 'éteint'}.` }] };
     }
 
-    const deviceId = TUYA_DEVICES[cleanName];
-    if (!deviceId) {
-      throw new Error(`ERREUR : '${args.device_name}' n'est pas un appareil Tuya. Utilise control_govee_device pour les lumières.`);
+    if (name === "control_govee_device") {
+      const matched = await controlGoveeDevice(args.device_name, isTurnOn);
+      return { content: [{ type: "text", text: `Govee '${matched}' ${isTurnOn ? 'allumé' : 'éteint'}.` }] };
     }
 
-    await controlTuyaDevice(deviceId, isTurnOn);
-    return { content: [{ type: "text", text: `Tuya '${args.device_name}' commandé.` }] };
-  }
+    return { content: [{ type: "text", text: `Outil inconnu : ${name}` }], isError: true };
 
-  if (name === "control_govee_device") {
-    const matched = await controlGoveeDevice(args.device_name, isTurnOn);
-    return { content: [{ type: "text", text: `Govee '${matched}' ${isTurnOn ? 'allumé' : 'éteint'}.` }] };
+  } catch (err) {
+    console.error("Erreur d'exécution de l'outil :", err.message);
+    return {
+      content: [{ type: "text", text: `Erreur d'exécution : ${err.message}` }],
+      isError: true
+    };
   }
-
-  throw new Error(`Tool inconnu : ${name}`);
 });
 
-// WebSocket
+// Connexion WebSocket Xiaozhi
 const wsUrl = process.env.XIAOZHI_MCP_URL;
 if (wsUrl) {
   const ws = new WebSocket(wsUrl);
   ws.on("open", () => console.log("MCP Xiaozhi connecté !"));
+  ws.on("error", (err) => console.error("Erreur WS :", err.message));
 }
