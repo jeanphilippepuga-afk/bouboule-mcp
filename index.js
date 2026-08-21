@@ -188,14 +188,14 @@ function connectWebSocket() {
             tools: [
               {
                 name: "control_device",
-                description: "Contrôle les appareils domotiques",
+                description: "Contrôle les appareils domotiques (allumer ou éteindre)",
                 inputSchema: {
                   type: "object",
                   properties: {
                     device_name: { type: "string", description: "Nom de l'appareil (ex: neon, ventilateur salon, spot cuisine)" },
-                    state: { type: "string", enum: ["on", "off"], description: "État souhaité: 'on' pour allumer, 'off' pour éteindre" }
+                    state: { type: "string", enum: ["on", "off"], description: "État : 'on' pour allumer, 'off' pour éteindre" }
                   },
-                  required: ["device_name"]
+                  required: ["device_name", "state"]
                 }
               }
             ]
@@ -209,8 +209,16 @@ function connectWebSocket() {
         const rawDevice = args.device_name || args.device || "";
         const cleanName = normalizeText(rawDevice);
 
-        const rawState = String(args.state ?? args.action ?? args.power ?? args.status ?? "").toLowerCase().trim();
-        const isTurnOn = ["on", "allumer", "true", "1", "open", "active", "marche"].includes(rawState) || args.state === true || args.power === true;
+        const rawState = String(args.state ?? args.action ?? args.power ?? args.status ?? args.value ?? "").toLowerCase().trim();
+
+        let isTurnOn = true;
+        if (rawState) {
+          isTurnOn = ["on", "allumer", "true", "1", "open", "active", "marche"].includes(rawState) || args.state === true || args.power === true;
+        } else {
+          if (cleanName.includes("eteind") || cleanName.includes("stop") || cleanName.includes("off")) {
+            isTurnOn = false;
+          }
+        }
 
         console.log(`Ordre reçu pour '${rawDevice}' (args: ${JSON.stringify(args)}) -> ${isTurnOn ? 'ON' : 'OFF'}`);
 
