@@ -10,9 +10,15 @@ http.createServer((req, res) => res.end('OK')).listen(port);
 const clientId = (process.env.TUYA_CLIENT_ID || '').replace(/['"\s]/g, '');
 const secretKey = (process.env.TUYA_SECRET || '').replace(/['"\s]/g, '');
 
-// Connexion API Tuya Cloud (Central Europe)
-const tuya = new TuyaContext({
+// Instances Tuya pour tester les deux endpoints d'Europe
+const tuyaEU = new TuyaContext({
   baseUrl: 'https://openapi.tuyaeu.com',
+  accessKey: clientId,
+  secretKey: secretKey,
+});
+
+const tuyaCN = new TuyaContext({
+  baseUrl: 'https://openapi.tuyacn.com',
   accessKey: clientId,
   secretKey: secretKey,
 });
@@ -113,19 +119,29 @@ function connect() {
             let success = false;
             let response = null;
 
-            for (const code of possibleCodes) {
-              response = await tuya.request({
-                path: `/v1.0/devices/${deviceId}/commands`,
-                method: 'POST',
-                body: { commands: [{ code: code, value: isTurnOn }] }
-              });
+            // Essai avec l'ensemble des clients et des codes
+            const clients = [tuyaEU, tuyaCN];
 
-              console.log(`Essai Tuya (${code}) :`, JSON.stringify(response));
+            for (const client of clients) {
+              for (const code of possibleCodes) {
+                try {
+                  response = await client.request({
+                    path: `/v1.0/devices/${deviceId}/commands`,
+                    method: 'POST',
+                    body: { commands: [{ code: code, value: isTurnOn }] }
+                  });
 
-              if (response && response.success) {
-                success = true;
-                break;
+                  console.log(`Essai Tuya (${code}) :`, JSON.stringify(response));
+
+                  if (response && response.success) {
+                    success = true;
+                    break;
+                  }
+                } catch (err) {
+                  console.log(`Échec sur cet endpoint/code : ${err.message}`);
+                }
               }
+              if (success) break;
             }
 
             if (success) {
