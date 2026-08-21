@@ -6,11 +6,11 @@ const { TuyaContext } = require('@tuya/tuya-connector-nodejs');
 const port = process.env.PORT || 10000;
 http.createServer((req, res) => res.end('OK')).listen(port);
 
-// Connexion API Tuya Cloud (Serveur Europe)
+// Connexion API Tuya Cloud configurée pour Central Europe
 const tuya = new TuyaContext({
   baseUrl: 'https://openapi.tuyaeu.com',
-  accessKey: process.env.TUYA_CLIENT_ID,
-  secretKey: process.env.TUYA_SECRET,
+  accessKey: process.env.TUYA_CLIENT_ID?.trim(),
+  secretKey: process.env.TUYA_SECRET?.trim(),
 });
 
 // Table des appareils
@@ -64,7 +64,7 @@ function connect() {
           ws.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: {} }));
         }
       }
-      // Declaration des outils
+      // Déclaration des outils
       else if (msg.method === 'tools/list') {
         ws.send(JSON.stringify({
           jsonrpc: '2.0',
@@ -72,13 +72,13 @@ function connect() {
           result: {
             tools: [{
               name: 'control_tuya_device',
-              description: 'Pilote les équipements domotiques de l\'appartement (Télé, Ampli, Ruban, Ventilateur salon, Ventilateur chambre, Spot cuisine, Spot couloir)',
+              description: 'Pilote les équipements domotiques de l\'appartement',
               inputSchema: {
                 type: 'object',
                 properties: {
                   device_name: {
                     type: 'string',
-                    description: 'Nom exact de l\'appareil à piloter'
+                    description: 'Nom exact de l\'appareil'
                   },
                   state: { type: 'string', enum: ['on', 'off'] }
                 },
@@ -88,7 +88,7 @@ function connect() {
           }
         }));
       } 
-      // Executer l'outil
+      // Exécuter l'outil
       else if (msg.method === 'tools/call' && msg.params?.name === 'control_tuya_device') {
         const { device_name, state } = msg.params.arguments;
         
@@ -107,7 +107,6 @@ function connect() {
           resultText = `Erreur : l'ID Tuya pour ${matchedKey} n'est pas configuré.`;
         } else {
           try {
-            // Test des codes spécifiques aux douilles/ampoules/prises Tuya
             const possibleCodes = ['switch_led', 'switch', 'switch_1', 'light'];
             let success = false;
             let response = null;
