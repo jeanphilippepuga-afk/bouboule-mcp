@@ -15,16 +15,13 @@ const TUYA_CLIENT_ID = process.env.TUYA_CLIENT_ID;
 const TUYA_SECRET = process.env.TUYA_SECRET;
 const GOVEE_API_KEY = process.env.GOVEE_API_KEY;
 
-// --- 3. Dictionnaire complet des appareils Tuya & synonymes ---
+// --- 3. Dictionnaire des appareils Tuya uniquement ---
 const TUYA_DEVICES = {
   "musique": "bff13ef303c235bff5ctrs",
   "hifi": "bff13ef303c235bff5ctrs",
   "neon salon": "bfe70cfada2d079843d2sm",
   "neon": "bfe70cfada2d079843d2sm",
   "ruban": "bfe70cfada2d079843d2sm",
-  "led salon": "bfe70cfada2d079843d2sm",
-  "led": "bfe70cfada2d079843d2sm",
-  "lumiere salon": "bfe70cfada2d079843d2sm",
   "chevet": "bf1b805315f5430c95jiip",
   "tele": "bf40d05c8117f4c375vtzq",
   "télé": "bf40d05c8117f4c375vtzq",
@@ -126,7 +123,8 @@ async function controlGoveeDevice(deviceName, turnOn) {
     return dName.includes(searchKey) || searchKey.includes(dName) ||
            (searchKey.includes("couloir") && dName.includes("couloir")) ||
            (searchKey.includes("cuisine") && dName.includes("cuisine")) ||
-           (searchKey.includes("spot") && dName.includes("spot"));
+           (searchKey.includes("spot") && dName.includes("spot")) ||
+           (searchKey.includes("led") && dName.includes("led"));
   });
 
   if (!target) {
@@ -157,7 +155,6 @@ function connectWebSocket() {
 
   ws.on("open", () => {
     console.log("Connecté au serveur MCP Xiaozhi !");
-    // Ping régulier pour éviter que la connexion ne retombe après 2 minutes
     heartbeatInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.ping();
@@ -234,7 +231,8 @@ function connectWebSocket() {
 
         try {
           let matched = "";
-          if (cleanName.includes("couloir") || cleanName.includes("cuisine") || cleanName.includes("spot") || cleanName.includes("govee")) {
+          // Routage prioritaire vers Govee pour couloir, cuisine, spot, led, govee
+          if (cleanName.includes("couloir") || cleanName.includes("cuisine") || cleanName.includes("spot") || cleanName.includes("led") || cleanName.includes("govee")) {
             matched = await controlGoveeDevice(rawDevice, isTurnOn);
             ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: `Govee '${matched}' OK` }] } }));
             return;
