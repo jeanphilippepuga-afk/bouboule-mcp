@@ -39,6 +39,9 @@ function connect() {
   });
 
   ws.on('message', async (data) => {
+    // Journal de suivi pour voir le moindre message reçu de Xiaozhi
+    console.log('Message reçu de Xiaozhi :', data.toString());
+
     try {
       const msg = JSON.parse(data.toString());
 
