@@ -56,9 +56,9 @@ function connect() {
           }
         }));
       } 
-      // Ignorer proprement les notifications sans ID
+      // Validation de l'initialisation
       else if (msg.method === 'notifications/initialized') {
-        // Validation de l'initialisation côté MCP
+        // Handshake OK
       }
       // Pings de maintien
       else if (msg.method === 'ping') {
@@ -99,6 +99,8 @@ function connect() {
         const { device_name, state } = msg.params.arguments;
         const deviceId = DEVICE_IDS[device_name];
 
+        console.log(`Ordre reçu : ${device_name} -> ${state} (ID: ${deviceId})`);
+
         let resultText = '';
 
         if (!deviceId || deviceId.startsWith('ID_')) {
@@ -110,8 +112,7 @@ function connect() {
               method: 'POST',
               body: {
                 commands: [
-                  { code: 'switch_1', value: state === 'on' },
-                  { code: 'switch', value: state === 'on' }
+                  { code: 'switch_1', value: state === 'on' }
                 ]
               }
             });
