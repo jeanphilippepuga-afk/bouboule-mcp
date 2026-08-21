@@ -2,24 +2,23 @@ const http = require('http');
 const WebSocket = require('ws');
 const { TuyaContext } = require('@tuya/tuya-connector-nodejs');
 
-// Petit serveur HTTP pour Render
+// Mini serveur HTTP pour maintenir Render actif
 const port = process.env.PORT || 10000;
 http.createServer((req, res) => res.end('OK')).listen(port);
 
-// Initialisation du client Tuya (Région EU par défaut)
+// Connexion à l'API Cloud Tuya (Serveur Europe)
 const tuya = new TuyaContext({
   baseUrl: 'https://openapi.tuyaeu.com',
   accessKey: process.env.TUYA_CLIENT_ID,
   secretKey: process.env.TUYA_SECRET,
 });
 
-// Table de correspondance Noms <-> ID d'appareils Tuya
-// (Remplace les 'ID_...' par les vrais IDs de ton app Smart Life / Tuya IoT)
+// Correspondance Noms <-> IDs virtuels Tuya
 const DEVICE_IDS = {
   'Télé': 'ID_TELE',
   'Ampli': 'ID_AMPLI',
   'Ruban': 'ID_RUBAN',
-  'Ventilateur salon': 'ID_VENTILATEUR_SALON',
+  'Ventilateur salon': 'bf09710e9bb5de233dfltn',
   'Ventilateur chambre': 'ID_VENTILATEUR_CHAMBRE',
   'Spot cuisine': 'ID_SPOT_CUISINE',
   'Spot couloir': 'ID_SPOT_COULOIR'
@@ -72,10 +71,9 @@ function connect() {
         let resultText = '';
 
         if (!deviceId || deviceId.startsWith('ID_')) {
-          resultText = `Erreur : l'ID Tuya pour ${device_name} n'est pas renseigné dans le code.`;
+          resultText = `Erreur : l'ID Tuya pour ${device_name} n'est pas encore renseigné.`;
         } else {
           try {
-            // Envoi de la commande réelle à l'API Tuya
             await tuya.request({
               path: `/v1.0/devices/${deviceId}/commands`,
               method: 'POST',
