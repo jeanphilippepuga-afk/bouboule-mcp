@@ -15,13 +15,16 @@ const TUYA_CLIENT_ID = process.env.TUYA_CLIENT_ID;
 const TUYA_SECRET = process.env.TUYA_SECRET;
 const GOVEE_API_KEY = process.env.GOVEE_API_KEY;
 
-// --- 3. Dictionnaire complet des appareils Tuya ---
+// --- 3. Dictionnaire complet des appareils Tuya & synonymes ---
 const TUYA_DEVICES = {
   "musique": "bff13ef303c235bff5ctrs",
   "hifi": "bff13ef303c235bff5ctrs",
   "neon salon": "bfe70cfada2d079843d2sm",
   "neon": "bfe70cfada2d079843d2sm",
   "ruban": "bfe70cfada2d079843d2sm",
+  "led salon": "bfe70cfada2d079843d2sm",
+  "led": "bfe70cfada2d079843d2sm",
+  "lumiere salon": "bfe70cfada2d079843d2sm",
   "chevet": "bf1b805315f5430c95jiip",
   "tele": "bf40d05c8117f4c375vtzq",
   "télé": "bf40d05c8117f4c375vtzq",
@@ -150,9 +153,16 @@ function connectWebSocket() {
   if (!wsUrl) return;
 
   const ws = new WebSocket(wsUrl);
+  let heartbeatInterval;
 
   ws.on("open", () => {
     console.log("Connecté au serveur MCP Xiaozhi !");
+    // Ping régulier pour éviter que la connexion ne retombe après 2 minutes
+    heartbeatInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.ping();
+      }
+    }, 30000);
   });
 
   ws.on("message", async (data) => {
@@ -188,12 +198,12 @@ function connectWebSocket() {
             tools: [
               {
                 name: "control_device",
-                description: "Contrôle les appareils domotiques (allumer ou éteindre)",
+                description: "Contrôle les appareils domotiques (ex: neon salon, led salon, lumiere couloir, spot cuisine, musique, ventilateur, tele, chevet). Indiquer l'appareil et 'on' ou 'off'.",
                 inputSchema: {
                   type: "object",
                   properties: {
-                    device_name: { type: "string", description: "Nom de l'appareil (ex: neon, ventilateur salon, spot cuisine)" },
-                    state: { type: "string", enum: ["on", "off"], description: "État : 'on' pour allumer, 'off' pour éteindre" }
+                    device_name: { type: "string", description: "Nom de l'appareil à contrôler" },
+                    state: { type: "string", enum: ["on", "off"], description: "État souhaité: 'on' pour allumer, 'off' pour éteindre" }
                   },
                   required: ["device_name", "state"]
                 }
@@ -250,9 +260,13 @@ function connectWebSocket() {
     }
   });
 
-  ws.on("error", (err) => console.error("Erreur WS :", err.message));
+  ws.on("error", (err) => {
+    clearInterval(heartbeatInterval);
+    console.error("Erreur WS :", err.message);
+  });
 
   ws.on("close", () => {
+    clearInterval(heartbeatInterval);
     console.log("WebSocket fermé. Reconnexion dans 5 secondes...");
     setTimeout(connectWebSocket, 5000);
   });
