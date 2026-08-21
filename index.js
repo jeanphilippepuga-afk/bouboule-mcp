@@ -6,14 +6,14 @@ const { TuyaContext } = require('@tuya/tuya-connector-nodejs');
 const port = process.env.PORT || 10000;
 http.createServer((req, res) => res.end('OK')).listen(port);
 
-// Connexion à l'API Cloud Tuya (Serveur Europe)
+// Connexion API Tuya Cloud (Serveur Europe)
 const tuya = new TuyaContext({
   baseUrl: 'https://openapi.tuyaeu.com',
   accessKey: process.env.TUYA_CLIENT_ID,
   secretKey: process.env.TUYA_SECRET,
 });
 
-// Correspondance Noms <-> IDs virtuels Tuya
+// Table des appareils avec ton ID virtuel pour le ventilateur du salon
 const DEVICE_IDS = {
   'Télé': 'ID_TELE',
   'Ampli': 'ID_AMPLI',
@@ -71,20 +71,32 @@ function connect() {
         let resultText = '';
 
         if (!deviceId || deviceId.startsWith('ID_')) {
-          resultText = `Erreur : l'ID Tuya pour ${device_name} n'est pas encore renseigné.`;
+          resultText = `Erreur : l'ID Tuya pour ${device_name} n'est pas configuré.`;
         } else {
           try {
-            await tuya.request({
+            // Envoi des commandes switch_1 et switch
+            const response = await tuya.request({
               path: `/v1.0/devices/${deviceId}/commands`,
               method: 'POST',
               body: {
-                commands: [{ code: 'switch_1', value: state === 'on' }]
+                commands: [
+                  { code: 'switch_1', value: state === 'on' },
+                  { code: 'switch', value: state === 'on' }
+                ]
               }
             });
-            resultText = `C'est fait, le ${device_name} est ${state === 'on' ? 'allumé' : 'éteint'}.`;
+
+            console.log('Réponse Tuya :', JSON.stringify(response));
+
+            if (response && response.success) {
+              resultText = `C'est fait, le ${device_name} est ${state === 'on' ? 'allumé' : 'éteint'}.`;
+            } else {
+              console.error('Échec Tuya API :', response);
+              resultText = `Impossible d'actionner le ${device_name}.`;
+            }
           } catch (tuyaErr) {
-            console.error('Erreur Tuya :', tuyaErr);
-            resultText = `Problème lors du contrôle du ${device_name}.`;
+            console.error('Erreur Tuya catch :', tuyaErr);
+            resultText = `Erreur lors de la commande du ${device_name}.`;
           }
         }
 
