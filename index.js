@@ -5,7 +5,7 @@ import axios from "axios";
 import crypto from "crypto";
 import http from "http";
 
-// Serveur HTTP factice pour garder Render en vie
+// Serveur HTTP pour maintenir Render actif
 const PORT = process.env.PORT || 10000;
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
@@ -17,7 +17,7 @@ const TUYA_CLIENT_ID = process.env.TUYA_CLIENT_ID;
 const TUYA_SECRET = process.env.TUYA_SECRET;
 const GOVEE_API_KEY = process.env.GOVEE_API_KEY;
 
-// Table exacte des appareils Tuya
+// Table des appareils Tuya
 const TUYA_DEVICES = {
   "musique": "bff13ef303c235bff5ctrs",
   "hifi": "bff13ef303c235bff5ctrs",
@@ -171,16 +171,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
-// Connexion WebSocket résiliente
+// WebSocket avec Keep-Alive (Ping toutes les 15s)
+let pingInterval = null;
+
 function connectWebSocket() {
   const wsUrl = process.env.XIAOZHI_MCP_URL;
   if (!wsUrl) return;
 
   const ws = new WebSocket(wsUrl);
-  ws.on("open", () => console.log("Connecté au serveur MCP Xiaozhi !"));
+
+  ws.on("open", () => {
+    console.log("Connecté au serveur MCP Xiaozhi !");
+    if (pingInterval) clearInterval(pingInterval);
+    pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.ping();
+      }
+    }, 15000);
+  });
+
   ws.on("error", (err) => console.error("Erreur WS :", err.message));
+
   ws.on("close", () => {
     console.log("WebSocket fermé. Reconnexion dans 5 secondes...");
+    if (pingInterval) clearInterval(pingInterval);
     setTimeout(connectWebSocket, 5000);
   });
 }
