@@ -44,7 +44,7 @@ function connect() {
     try {
       const msg = JSON.parse(data.toString());
 
-      // Handshake d'initialisation du protocole MCP
+      // Initialisation du protocole MCP
       if (msg.method === 'initialize') {
         ws.send(JSON.stringify({
           jsonrpc: '2.0',
@@ -56,15 +56,21 @@ function connect() {
           }
         }));
       } 
-      // Réponse aux pings de maintien de connexion
-      else if (msg.method === 'ping') {
-        ws.send(JSON.stringify({
-          jsonrpc: '2.0',
-          id: msg.id,
-          result: {}
-        }));
+      // Ignorer proprement les notifications sans ID
+      else if (msg.method === 'notifications/initialized') {
+        // Validation de l'initialisation côté MCP
       }
-      // Liste des outils disponibles
+      // Pings de maintien
+      else if (msg.method === 'ping') {
+        if (msg.id !== undefined) {
+          ws.send(JSON.stringify({
+            jsonrpc: '2.0',
+            id: msg.id,
+            result: {}
+          }));
+        }
+      }
+      // Liste des outils
       else if (msg.method === 'tools/list') {
         ws.send(JSON.stringify({
           jsonrpc: '2.0',
@@ -88,7 +94,7 @@ function connect() {
           }
         }));
       } 
-      // Exécution des commandes domotiques
+      // Appel de l'outil domotique
       else if (msg.method === 'tools/call' && msg.params?.name === 'control_tuya_device') {
         const { device_name, state } = msg.params.arguments;
         const deviceId = DEVICE_IDS[device_name];
