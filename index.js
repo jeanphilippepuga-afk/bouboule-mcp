@@ -94,6 +94,7 @@ async function controlTuyaDevice(deviceId, turnOn) {
       );
 
       if (res.data?.success) {
+        console.log(`Commande Tuya réussie avec le code '${code}' pour ${deviceId}`);
         return res.data;
       }
 
@@ -191,8 +192,8 @@ function connectWebSocket() {
                 inputSchema: {
                   type: "object",
                   properties: {
-                    device_name: { type: "string" },
-                    state: { type: "string", enum: ["on", "off"] }
+                    device_name: { type: "string", description: "Nom de l'appareil (ex: neon, ventilateur salon, spot cuisine)" },
+                    state: { type: "string", enum: ["on", "off"], description: "État souhaité: 'on' pour allumer, 'off' pour éteindre" }
                   },
                   required: ["device_name"]
                 }
@@ -205,11 +206,13 @@ function connectWebSocket() {
 
       if (msg.method === "tools/call") {
         const args = msg.params?.arguments || {};
-        const rawDevice = args.device_name || "";
+        const rawDevice = args.device_name || args.device || "";
         const cleanName = normalizeText(rawDevice);
-        const isTurnOn = (args.state === "on" || args.state === "allumer");
 
-        console.log(`Ordre en cours pour : '${rawDevice}' -> ${isTurnOn ? 'ON' : 'OFF'}`);
+        const rawState = String(args.state ?? args.action ?? args.power ?? args.status ?? "").toLowerCase().trim();
+        const isTurnOn = ["on", "allumer", "true", "1", "open", "active", "marche"].includes(rawState) || args.state === true || args.power === true;
+
+        console.log(`Ordre reçu pour '${rawDevice}' (args: ${JSON.stringify(args)}) -> ${isTurnOn ? 'ON' : 'OFF'}`);
 
         try {
           let matched = "";
