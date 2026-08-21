@@ -66,34 +66,45 @@ async function controlTuyaDevice(deviceId, turnOn) {
   const token = await getTuyaToken();
   if (!token) throw new Error("Impossible d'obtenir le token Tuya.");
 
-  const t = Date.now().toString();
-  const body = JSON.stringify({ commands: [{ code: "switch_1", value: turnOn }] });
-  const contentSha256 = crypto.createHash("sha256").update(body).digest("hex");
-  const stringToSign = ["POST", contentSha256, "", `/v1.0/devices/${deviceId}/commands`].join("\n");
-  const signStr = TUYA_CLIENT_ID + token + t + stringToSign;
-  const sign = crypto.createHmac("sha256", TUYA_SECRET).update(signStr).digest("HEX").toUpperCase();
+  const possibleCodes = ["switch_1", "switch_led", "switch"];
+  let lastError = null;
 
-  const res = await axios.post(
-    `https://openapi.tuyaeu.com/v1.0/devices/${deviceId}/commands`,
-    body,
-    {
-      headers: {
-        client_id: TUYA_CLIENT_ID,
-        access_token: token,
-        sign,
-        t,
-        sign_method: "HMAC-SHA256",
-        "Content-Type": "application/json"
+  for (const code of possibleCodes) {
+    const t = Date.now().toString();
+    const body = JSON.stringify({ commands: [{ code: code, value: turnOn }] });
+    const contentSha256 = crypto.createHash("sha256").update(body).digest("hex");
+    const stringToSign = ["POST", contentSha256, "", `/v1.0/devices/${deviceId}/commands`].join("\n");
+    const signStr = TUYA_CLIENT_ID + token + t + stringToSign;
+    const sign = crypto.createHmac("sha256", TUYA_SECRET).update(signStr).digest("HEX").toUpperCase();
+
+    try {
+      const res = await axios.post(
+        `https://openapi.tuyaeu.com/v1.0/devices/${deviceId}/commands`,
+        body,
+        {
+          headers: {
+            client_id: TUYA_CLIENT_ID,
+            access_token: token,
+            sign,
+            t,
+            sign_method: "HMAC-SHA256",
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      if (res.data?.success) {
+        return res.data;
       }
-    }
-  );
 
-  if (!res.data?.success) {
-    console.error("Détail erreur commande Tuya :", JSON.stringify(res.data));
-    throw new Error(`Tuya commande [code ${res.data?.code}] : ${res.data?.msg}`);
+      console.log(`Code Tuya '${code}' rejeté pour ${deviceId} : ${res.data?.msg}`);
+      lastError = new Error(`Tuya commande [code ${res.data?.code}] : ${res.data?.msg}`);
+    } catch (err) {
+      lastError = err;
+    }
   }
 
-  return res.data;
+  throw lastError || new Error("Aucun code de commande Tuya compatible trouvé.");
 }
 
 async function controlGoveeDevice(deviceName, turnOn) {
