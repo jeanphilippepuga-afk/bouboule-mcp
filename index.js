@@ -5,7 +5,7 @@ import axios from "axios";
 import crypto from "crypto";
 import http from "http";
 
-// Serveur HTTP pour Render
+// Serveur HTTP pour maintenir Render actif
 const PORT = process.env.PORT || 10000;
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
@@ -183,11 +183,25 @@ function connectWebSocket() {
   ws.on("open", () => {
     console.log("Connecté au serveur MCP Xiaozhi !");
     if (pingInterval) clearInterval(pingInterval);
+
+    // Initialisation du protocole MCP
+    ws.send(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "bouboule-mcp", version: "1.0.0" }
+      }
+    }));
+
+    // Envoi d'un ping JSON-RPC toutes les 10 secondes
     pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ jsonrpc: "2.0", method: "ping", params: {} }));
       }
-    }, 15000);
+    }, 10000);
   });
 
   ws.on("error", (err) => console.error("Erreur WS :", err.message));
