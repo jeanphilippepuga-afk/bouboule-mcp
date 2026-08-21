@@ -50,7 +50,7 @@ async function getTuyaToken() {
   const signStr = TUYA_CLIENT_ID + t + stringToSign;
   const sign = crypto.createHmac("sha256", TUYA_SECRET).update(signStr).digest("HEX").toUpperCase();
 
-  const res = await axios.get("https://openapi.tuyaeu.com/v1/token?grant_type=1", {
+  const res = await axios.get("https://openapi.tuyaeu.com/v1.0/token?grant_type=1", {
     headers: { client_id: TUYA_CLIENT_ID, sign, t, sign_method: "HMAC-SHA256" }
   });
 
@@ -74,7 +74,7 @@ async function controlTuyaDevice(deviceId, turnOn) {
   const sign = crypto.createHmac("sha256", TUYA_SECRET).update(signStr).digest("HEX").toUpperCase();
 
   const res = await axios.post(
-    `https://openapi.tuyaeu.com/v1/devices/${deviceId}/commands`,
+    `https://openapi.tuyaeu.com/v1.0/devices/${deviceId}/commands`,
     body,
     {
       headers: {
