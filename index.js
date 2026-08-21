@@ -9,24 +9,25 @@ const TUYA_CLIENT_ID = process.env.TUYA_CLIENT_ID;
 const TUYA_SECRET = process.env.TUYA_SECRET;
 const GOVEE_API_KEY = process.env.GOVEE_API_KEY;
 
-// Table des appareils Tuya
+// Table exacte des appareils Tuya selon ton écran SmartLife / Tuya
 const TUYA_DEVICES = {
-  "ventilateur salon": "bf09710e9bb5de233dfltn",
-  "ventilateur chambre": "bf6cedea4ebc7d8f5eh9di",
+  "musique": "bff13ef303c235bff5ctrs",
+  "hifi": "bff13ef303c235bff5ctrs",
+  "ici": "bff13ef303c235bff5ctrs",
   "neon salon": "bfe70cfada2d079843d2sm",
   "neon": "bfe70cfada2d079843d2sm",
-  "ruban": "bfe70cfada2d079843d2sm",
-  "hifi": "bff13ef303c235bff5ctrs",
-  "musique": "bff13ef303c235bff5ctrs",
-  "ici": "bff13ef303c235bff5ctrs",
-  "ampli": "bff13ef303c235bff5ctrs",
+  "chevet": "bf1b805315f5430c95jiip",
+  "tele": "bf40d05c8117f4c375vtzq",
+  "télé": "bf40d05c8117f4c375vtzq",
+  "ampli": "bf82a30da98f6ed985xy80",
+  "ventilateur chambre": "bf6cedea4ebc7d8f5eh9di",
+  "ventilateur salon": "bf09710e9bb5de233dfltn",
   "television": "bfff3c709b433af741t9dz",
-  "tele": "bfff3c709b433af741t9dz",
   "informatique": "bf5406yyctvuikg1",
   "pc": "bf5406yyctvuikg1"
 };
 
-// Nettoyage de texte pour comparaison souple
+// Nettoyage de texte
 function normalizeText(text) {
   if (!text) return "";
   return text
@@ -48,7 +49,7 @@ async function getTuyaToken() {
   return res.data?.result?.access_token;
 }
 
-// Commande Tuya ciblée uniquement sur switch_1
+// Commande Tuya ciblée sur switch_1
 async function controlTuyaDevice(deviceId, turnOn) {
   const token = await getTuyaToken();
   if (!token) throw new Error("Impossible d'obtenir le token Tuya.");
@@ -77,9 +78,9 @@ async function controlTuyaDevice(deviceId, turnOn) {
   return res.data;
 }
 
-// Commande Govee API avec recherche souple
+// Commande Govee API
 async function controlGoveeDevice(deviceName, turnOn) {
-  if (!GOVEE_API_KEY) throw new Error("GOVEE_API_KEY manquante dans les variables de Render.");
+  if (!GOVEE_API_KEY) throw new Error("GOVEE_API_KEY manquante.");
 
   const listRes = await axios.get("https://developer-api.govee.com/v1/devices", {
     headers: { "Govee-API-Key": GOVEE_API_KEY }
@@ -98,7 +99,7 @@ async function controlGoveeDevice(deviceName, turnOn) {
 
   if (!target) {
     const names = devices.map(d => d.deviceName).join(", ");
-    throw new Error(`Appareil non trouvé sur Govee. Appareils dispo : [${names}]`);
+    throw new Error(`Inconnu sur Govee. Appareils dispo : [${names}]`);
   }
 
   await axios.put(
@@ -114,18 +115,17 @@ async function controlGoveeDevice(deviceName, turnOn) {
   return target.deviceName;
 }
 
-// Création Serveur MCP
+// Serveur MCP
 const server = new Server(
   { name: "bouboule-mcp", version: "1.0.0" },
   { capabilities: { tools: {} } }
 );
 
-// Exposition d'un seul outil global pour que Xiaozhi ne cherche pas
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: "control_device",
-      description: "Contrôle tous les appareils domotiques (lumières couloir, cuisine, spot, musique, hifi, ventilateur, tv, pc).",
+      description: "Contrôle tous les appareils de la maison de JP (lumières couloir, cuisine, spot, musique, hifi, ventilateur, tv, ampli, chevet, pc).",
       inputSchema: {
         type: "object",
         properties: {
@@ -139,7 +139,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   ]
 }));
 
-// Exécution des commandes sans faire planter le serveur
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     const args = request.params.arguments || {};
@@ -155,14 +154,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: "text", text: `Govee '${matched}' ${isTurnOn ? 'allumé' : 'éteint'}.` }] };
     }
 
-    // 2. Routage Tuya (Prises / HiFi / Musique / Ventilateurs / TV)
+    // 2. Routage Tuya
     const deviceId = TUYA_DEVICES[cleanName];
     if (deviceId) {
       await controlTuyaDevice(deviceId, isTurnOn);
       return { content: [{ type: "text", text: `Tuya '${rawDevice}' ${isTurnOn ? 'allumé' : 'éteint'}.` }] };
     }
 
-    // 3. Secours : Tentative sur Govee si absent de la liste Tuya
+    // 3. Secours Govee
     const matched = await controlGoveeDevice(rawDevice, isTurnOn);
     return { content: [{ type: "text", text: `Govee '${matched}' ${isTurnOn ? 'allumé' : 'éteint'}.` }] };
 
@@ -175,7 +174,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
-// Connexion WebSocket Xiaozhi
+// WebSocket Xiaozhi
 const wsUrl = process.env.XIAOZHI_MCP_URL;
 if (wsUrl) {
   const ws = new WebSocket(wsUrl);
@@ -183,6 +182,6 @@ if (wsUrl) {
   ws.on("error", (err) => console.error("Erreur WS :", err.message));
 }
 
-// Empêcher la fermeture inattendue de Node.js sur Render
+// Anti-crash Render
 process.on("uncaughtException", (err) => console.error("Erreur non capturée :", err));
 process.on("unhandledRejection", (reason) => console.error("Rejet non géré :", reason));
