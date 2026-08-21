@@ -6,22 +6,20 @@ const { TuyaContext } = require('@tuya/tuya-connector-nodejs');
 const port = process.env.PORT || 10000;
 http.createServer((req, res) => res.end('OK')).listen(port);
 
-// Connexion API Tuya Cloud configurée pour Central Europe
+// Connexion API Tuya Cloud (Region Central Europe)
 const tuya = new TuyaContext({
   baseUrl: 'https://openapi.tuyaeu.com',
   accessKey: process.env.TUYA_CLIENT_ID?.trim(),
   secretKey: process.env.TUYA_SECRET?.trim(),
 });
 
-// Table des appareils
+// Table des appareils actuellement EN LIGNE
 const DEVICE_IDS = {
-  'Télé': 'ID_TELE',
-  'Ampli': 'ID_AMPLI',
-  'Ruban': 'ID_RUBAN',
   'Ventilateur salon': 'bf09710e9bb5de233dfltn',
-  'Ventilateur chambre': 'ID_VENTILATEUR_CHAMBRE',
-  'Spot cuisine': 'ID_SPOT_CUISINE',
-  'Spot couloir': 'ID_SPOT_COULOIR'
+  'Neon salon': 'bfe70cfada2d079843d2sm',
+  'Ruban': 'bfe70cfada2d079843d2sm',
+  'Hi-fi': 'bff13ef303c235bff5ctrs',
+  'Ventilateur chambre': 'bf6cedea4ebc7d8f5eh9di'
 };
 
 const url = process.env.XIAOZHI_MCP_URL;
@@ -88,7 +86,7 @@ function connect() {
           }
         }));
       } 
-      // Exécuter l'outil
+      // Exécution des commandes
       else if (msg.method === 'tools/call' && msg.params?.name === 'control_tuya_device') {
         const { device_name, state } = msg.params.arguments;
         
@@ -103,8 +101,8 @@ function connect() {
 
         let resultText = '';
 
-        if (!deviceId || deviceId.startsWith('ID_')) {
-          resultText = `Erreur : l'ID Tuya pour ${matchedKey} n'est pas configuré.`;
+        if (!deviceId) {
+          resultText = `Erreur : l'appareil ${matchedKey} n'est pas reconnu ou est hors ligne.`;
         } else {
           try {
             const possibleCodes = ['switch_led', 'switch', 'switch_1', 'light'];
