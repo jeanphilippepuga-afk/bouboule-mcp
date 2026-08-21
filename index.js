@@ -26,7 +26,7 @@ const TUYA_DEVICES = {
   "pc": "bf5406yyctvuikg1"
 };
 
-// Helper Signature Tuya OpenAPI
+// Helper Tuya API
 async function getTuyaToken() {
   const t = Date.now().toString();
   const nonce = "";
@@ -66,6 +66,14 @@ async function controlTuyaDevice(deviceId, turnOn) {
   return res.data;
 }
 
+// Fonction de normalisation pour ignorer majuscules et accents (ex: "Lumière" -> "lumiere")
+function normalizeText(text) {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
 // Fonction de contrôle Govee
 async function controlGoveeDevice(deviceName, turnOn) {
   if (!GOVEE_API_KEY) throw new Error("GOVEE_API_KEY manquante.");
@@ -75,13 +83,17 @@ async function controlGoveeDevice(deviceName, turnOn) {
   });
 
   const devices = listRes.data?.data?.devices || [];
-  const searchKey = deviceName.toLowerCase().replace("lumiere", "").replace("spot", "").replace("led", "").trim();
+  const searchKey = normalizeText(deviceName);
 
-  const target = devices.find(d => d.deviceName.toLowerCase().includes(searchKey));
+  // Recherche souple : on vérifie si l'un contient l'autre (ex: "couloir" correspond à "Lumière Couloir")
+  const target = devices.find(d => {
+    const dName = normalizeText(d.deviceName);
+    return dName.includes(searchKey) || searchKey.includes(dName) || (searchKey.includes("couloir") && dName.includes("couloir")) || (searchKey.includes("cuisine") && dName.includes("cuisine")) || (searchKey.includes("salon") && dName.includes("salon"));
+  });
 
   if (!target) {
     const listNames = devices.map(d => d.deviceName).join(", ");
-    throw new Error(`Appareil Govee non trouvé pour '${deviceName}'. Appareils dispo sur ton compte : ${listNames}`);
+    throw new Error(`Appareil Govee non trouvé pour '${deviceName}'. Dispo : [${listNames}]`);
   }
 
   await axios.put(
@@ -107,7 +119,7 @@ server.setRequestHandler("tools/list", async () => ({
   tools: [
     {
       name: "control_tuya_device",
-      description: "Contrôle UNIQUEMENT : ventilateur salon, ventilateur chambre, neon salon, hifi, television, informatique. STRICTEMENT INTERDIT pour les autres lumières.",
+      description: "Contrôle UNIQUEMENT : ventilateur salon, ventilateur chambre, neon salon, hifi, television, informatique. STRICTEMENT INTERDIT pour les lumières du couloir, de la cuisine et le led salon.",
       inputSchema: {
         type: "object",
         properties: {
@@ -119,7 +131,7 @@ server.setRequestHandler("tools/list", async () => ({
     },
     {
       name: "control_govee_device",
-      description: "Contrôle TOUS les éclairages Govee : lumière cuisine, lumière couloir, led salon, spots et rubans.",
+      description: "Contrôle TOUS les éclairages Govee : Lumière Cuisine, Lumière Couloir, Led salon.",
       inputSchema: {
         type: "object",
         properties: {
@@ -146,11 +158,11 @@ server.setRequestHandler("tools/call", async (request) => {
     const deviceId = TUYA_DEVICES[cleanName];
 
     if (!deviceId) {
-      throw new Error(`ERREUR : '${args.device_name}' n'est pas un appareil Tuya validé. Utilise control_govee_device pour les lumières.`);
+      throw new Error(`ERREUR : '${args.device_name}' n'est pas un appareil Tuya. Utilise control_govee_device pour les lumières.`);
     }
 
     await controlTuyaDevice(deviceId, args.action === "on");
-    return { content: [{ type: "text", text: `Tuya '${args.device_name}' commandé avec succès.` }] };
+    return { content: [{ type: "text", text: `Tuya '${args.device_name}' commandé.` }] };
   }
 
   throw new Error(`Tool inconnu : ${name}`);
