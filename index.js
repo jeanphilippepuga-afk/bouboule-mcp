@@ -1,5 +1,6 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { WebSocket } from "ws";
 import axios from "axios";
 import crypto from "crypto";
@@ -66,7 +67,7 @@ async function controlTuyaDevice(deviceId, turnOn) {
   return res.data;
 }
 
-// Fonction de normalisation pour ignorer majuscules et accents (ex: "Lumière" -> "lumiere")
+// Normalisation du texte (ignore majuscules et accents)
 function normalizeText(text) {
   return text
     .toLowerCase()
@@ -85,7 +86,6 @@ async function controlGoveeDevice(deviceName, turnOn) {
   const devices = listRes.data?.data?.devices || [];
   const searchKey = normalizeText(deviceName);
 
-  // Recherche souple : on vérifie si l'un contient l'autre (ex: "couloir" correspond à "Lumière Couloir")
   const target = devices.find(d => {
     const dName = normalizeText(d.deviceName);
     return dName.includes(searchKey) || searchKey.includes(dName) || (searchKey.includes("couloir") && dName.includes("couloir")) || (searchKey.includes("cuisine") && dName.includes("cuisine")) || (searchKey.includes("salon") && dName.includes("salon"));
@@ -115,7 +115,7 @@ const server = new Server(
   { capabilities: { tools: {} } }
 );
 
-server.setRequestHandler("tools/list", async () => ({
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: "control_tuya_device",
@@ -144,7 +144,7 @@ server.setRequestHandler("tools/list", async () => ({
   ]
 }));
 
-server.setRequestHandler("tools/call", async (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   if (name === "control_govee_device") {
