@@ -3,19 +3,27 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprot
 import { WebSocket } from "ws";
 import axios from "axios";
 import crypto from "crypto";
+import http from "http";
+
+// Serveur HTTP factice pour garder Render en vie
+const PORT = process.env.PORT || 10000;
+http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("MCP Server OK\n");
+}).listen(PORT, () => console.log(`Serveur HTTP actif sur le port ${PORT}`));
 
 // Variables d'environnement
 const TUYA_CLIENT_ID = process.env.TUYA_CLIENT_ID;
 const TUYA_SECRET = process.env.TUYA_SECRET;
 const GOVEE_API_KEY = process.env.GOVEE_API_KEY;
 
-// Table exacte des appareils Tuya selon ton écran SmartLife / Tuya
+// Table exacte des appareils Tuya
 const TUYA_DEVICES = {
   "musique": "bff13ef303c235bff5ctrs",
   "hifi": "bff13ef303c235bff5ctrs",
-  "ici": "bff13ef303c235bff5ctrs",
   "neon salon": "bfe70cfada2d079843d2sm",
   "neon": "bfe70cfada2d079843d2sm",
+  "ruban": "bfe70cfada2d079843d2sm",
   "chevet": "bf1b805315f5430c95jiip",
   "tele": "bf40d05c8117f4c375vtzq",
   "télé": "bf40d05c8117f4c375vtzq",
@@ -27,7 +35,6 @@ const TUYA_DEVICES = {
   "pc": "bf5406yyctvuikg1"
 };
 
-// Nettoyage de texte
 function normalizeText(text) {
   if (!text) return "";
   return text
@@ -36,7 +43,6 @@ function normalizeText(text) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-// Token Tuya API
 async function getTuyaToken() {
   const t = Date.now().toString();
   const stringToSign = ["GET", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "", "/v1.0/token?grant_type=1"].join("\n");
@@ -49,7 +55,6 @@ async function getTuyaToken() {
   return res.data?.result?.access_token;
 }
 
-// Commande Tuya ciblée sur switch_1
 async function controlTuyaDevice(deviceId, turnOn) {
   const token = await getTuyaToken();
   if (!token) throw new Error("Impossible d'obtenir le token Tuya.");
@@ -78,7 +83,6 @@ async function controlTuyaDevice(deviceId, turnOn) {
   return res.data;
 }
 
-// Commande Govee API
 async function controlGoveeDevice(deviceName, turnOn) {
   if (!GOVEE_API_KEY) throw new Error("GOVEE_API_KEY manquante.");
 
@@ -99,7 +103,7 @@ async function controlGoveeDevice(deviceName, turnOn) {
 
   if (!target) {
     const names = devices.map(d => d.deviceName).join(", ");
-    throw new Error(`Inconnu sur Govee. Appareils dispo : [${names}]`);
+    throw new Error(`Non trouvé sur Govee. Appareils dispo : [${names}]`);
   }
 
   await axios.put(
@@ -115,7 +119,6 @@ async function controlGoveeDevice(deviceName, turnOn) {
   return target.deviceName;
 }
 
-// Serveur MCP
 const server = new Server(
   { name: "bouboule-mcp", version: "1.0.0" },
   { capabilities: { tools: {} } }
@@ -125,7 +128,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: "control_device",
-      description: "Contrôle tous les appareils de la maison de JP (lumières couloir, cuisine, spot, musique, hifi, ventilateur, tv, ampli, chevet, pc).",
+      description: "Contrôle les appareils domotiques (musique, hifi, neon, ampli, tele, couloir, cuisine, spot, ventilateur, chevet).",
       inputSchema: {
         type: "object",
         properties: {
@@ -148,40 +151,41 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     console.log(`Ordre reçu pour : '${rawDevice}' (Action: ${isTurnOn ? 'ON' : 'OFF'})`);
 
-    // 1. Routage Govee (Éclairages)
     if (cleanName.includes("couloir") || cleanName.includes("cuisine") || cleanName.includes("spot") || cleanName.includes("lumiere") || cleanName.includes("govee")) {
       const matched = await controlGoveeDevice(rawDevice, isTurnOn);
       return { content: [{ type: "text", text: `Govee '${matched}' ${isTurnOn ? 'allumé' : 'éteint'}.` }] };
     }
 
-    // 2. Routage Tuya
     const deviceId = TUYA_DEVICES[cleanName];
     if (deviceId) {
       await controlTuyaDevice(deviceId, isTurnOn);
       return { content: [{ type: "text", text: `Tuya '${rawDevice}' ${isTurnOn ? 'allumé' : 'éteint'}.` }] };
     }
 
-    // 3. Secours Govee
     const matched = await controlGoveeDevice(rawDevice, isTurnOn);
     return { content: [{ type: "text", text: `Govee '${matched}' ${isTurnOn ? 'allumé' : 'éteint'}.` }] };
 
   } catch (err) {
     console.error("Erreur commande :", err.message);
-    return {
-      content: [{ type: "text", text: `Ça coince : ${err.message}` }],
-      isError: true
-    };
+    return { content: [{ type: "text", text: `Ça coince : ${err.message}` }], isError: true };
   }
 });
 
-// WebSocket Xiaozhi
-const wsUrl = process.env.XIAOZHI_MCP_URL;
-if (wsUrl) {
+// Connexion WebSocket résiliente
+function connectWebSocket() {
+  const wsUrl = process.env.XIAOZHI_MCP_URL;
+  if (!wsUrl) return;
+
   const ws = new WebSocket(wsUrl);
   ws.on("open", () => console.log("Connecté au serveur MCP Xiaozhi !"));
   ws.on("error", (err) => console.error("Erreur WS :", err.message));
+  ws.on("close", () => {
+    console.log("WebSocket fermé. Reconnexion dans 5 secondes...");
+    setTimeout(connectWebSocket, 5000);
+  });
 }
 
-// Anti-crash Render
+connectWebSocket();
+
 process.on("uncaughtException", (err) => console.error("Erreur non capturée :", err));
 process.on("unhandledRejection", (reason) => console.error("Rejet non géré :", reason));
