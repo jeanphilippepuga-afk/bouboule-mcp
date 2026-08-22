@@ -23,6 +23,9 @@ const TUYA_DEVICES = {
   "neon": "bfe70cfada2d079843d2sm",
   "ruban": "bfe70cfada2d079843d2sm",
   "chevet": "bf1b805315f5430c95jiip",
+  "lumiere chambre": "bf1b805315f5430c95jiip",
+  "prise chambre": "bf1b805315f5430c95jiip",
+  "chambre": "bf1b805315f5430c95jiip",
   "tele": "bfff3c709b433af741t9dz",
   "télé": "bfff3c709b433af741t9dz",
   "tv": "bfff3c709b433af741t9dz",
@@ -197,12 +200,12 @@ function connectWebSocket() {
             tools: [
               {
                 name: "control_device",
-                description: "Contrôle les appareils domotiques (ex: neon salon, led salon, lumiere couloir, spot cuisine, musique, ventilateur, tele, television, chevet). Indiquer l'appareil et 'on' ou 'off'.",
+                description: "Contrôle les appareils domotiques ou déclenche des routines (reveille, dodo, television, cuisine, chevet, neon...).",
                 inputSchema: {
                   type: "object",
                   properties: {
-                    device_name: { type: "string", description: "Nom de l'appareil à contrôler" },
-                    state: { type: "string", enum: ["on", "off"], description: "État souhaité: 'on' pour allumer, 'off' pour éteindre" }
+                    device_name: { type: "string", description: "Nom de l'appareil ou de la routine ('reveille', 'dodo', 'television', etc.)" },
+                    state: { type: "string", enum: ["on", "off"], description: "État souhaité: 'on' pour allumer/déclencher, 'off' pour éteindre" }
                   },
                   required: ["device_name", "state"]
                 }
@@ -229,9 +232,28 @@ function connectWebSocket() {
           }
         }
 
-        console.log(`Ordre reçu pour '${rawDevice}' (args: ${JSON.stringify(args)}) -> ${isTurnOn ? 'ON' : 'OFF'}`);
+        console.log(`Ordre reçu pour '${rawDevice}' -> ${isTurnOn ? 'ON' : 'OFF'}`);
 
         try {
+          // ROUTINE 1 : RÉVEIL
+          if (cleanName.includes("reveil") || cleanName.includes("reveille")) {
+            await controlTuyaDevice(TUYA_DEVICES["television"], true);
+            await controlGoveeDevice("cuisine", true);
+            ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "Routine réveil exécutée : télévision et lumière cuisine allumées !" }] } }));
+            return;
+          }
+
+          // ROUTINE 2 : DODO
+          if (cleanName.includes("dodo") || cleanName.includes("bonne nuit")) {
+            try { await controlTuyaDevice(TUYA_DEVICES["television"], false); } catch(e){}
+            try { await controlTuyaDevice(TUYA_DEVICES["neon"], false); } catch(e){}
+            try { await controlGoveeDevice("spot", false); } catch(e){}
+            try { await controlGoveeDevice("cuisine", false); } catch(e){}
+            try { await controlTuyaDevice(TUYA_DEVICES["chevet"], true); } catch(e){}
+            ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "Routine dodo exécutée : télévision, néon et spots éteints, lumière chambre allumée !" }] } }));
+            return;
+          }
+
           let matched = "";
           // Routage prioritaire vers Govee pour couloir, cuisine, spot, led, govee
           if (cleanName.includes("couloir") || cleanName.includes("cuisine") || cleanName.includes("spot") || cleanName.includes("led") || cleanName.includes("govee")) {
