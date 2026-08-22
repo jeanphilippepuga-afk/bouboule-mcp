@@ -23,14 +23,14 @@ const TUYA_DEVICES = {
   "neon": "bfe70cfada2d079843d2sm",
   "ruban": "bfe70cfada2d079843d2sm",
   
-  // Prise Lumière Chambre / Chevet
-  "chevet": "bf1b805315f5430c95jiip",
-  "lumiere chambre": "bf1b805315f5430c95jiip",
-  "lumière chambre": "bf1b805315f5430c95jiip",
-  "prise chambre": "bf1b805315f5430c95jiip",
-  "prise lumiere chambre": "bf1b805315f5430c95jiip",
-  "prise lumière chambre": "bf1b805315f5430c95jiip",
-  "lampe chambre": "bf1b805315f5430c95jiip",
+  // Prise Lumière Chambre / Chevet (ID mis à jour)
+  "chevet": "bf9df2xf0qxxpxmj",
+  "lumiere chambre": "bf9df2xf0qxxpxmj",
+  "lumière chambre": "bf9df2xf0qxxpxmj",
+  "prise chambre": "bf9df2xf0qxxpxmj",
+  "prise lumiere chambre": "bf9df2xf0qxxpxmj",
+  "prise lumière chambre": "bf9df2xf0qxxpxmj",
+  "lampe chambre": "bf9df2xf0qxxpxmj",
 
   // Télévision & Audio
   "tele": "bfff3c709b433af741t9dz",
@@ -57,16 +57,13 @@ function normalizeText(text) {
   return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
-// Recherche intelligente de l'ID Tuya
 function findTuyaDeviceId(cleanName) {
   if (TUYA_DEVICES[cleanName]) return TUYA_DEVICES[cleanName];
 
-  // Détection par mots-clés pour la chambre
   if (cleanName.includes("chambre") && (cleanName.includes("lumiere") || cleanName.includes("prise") || cleanName.includes("chevet") || cleanName.includes("lampe"))) {
     return TUYA_DEVICES["chevet"];
   }
 
-  // Détection par mots-clés pour l'informatique / PC
   if (cleanName.includes("informatique") || cleanName.includes("pc") || cleanName.includes("ordinateur")) {
     return TUYA_DEVICES["informatique"];
   }
@@ -100,8 +97,7 @@ async function controlTuyaDevice(deviceId, turnOn) {
   const token = await getTuyaToken();
   if (!token) throw new Error("Impossible d'obtenir le token Tuya.");
 
-  // Teste les codes d'action usuels des prises et interrupteurs SmartLife
-  const possibleCodes = ["switch_1", "switch", "switch_p", "power", "power_1", "switch_led"];
+  const possibleCodes = ["switch_1", "switch", "switch_p", "power", "power_1", "switch_led", "switch_2"];
   let lastError = null;
 
   for (const code of possibleCodes) {
@@ -132,13 +128,14 @@ async function controlTuyaDevice(deviceId, turnOn) {
         console.log(`Commande Tuya réussie ('${code}') pour ${deviceId}`);
         return res.data;
       }
-      lastError = new Error(`Tuya commande [code ${res.data?.code}] : ${res.data?.msg}`);
+      console.log(`Code Tuya '${code}' rejeté pour ${deviceId} : [code ${res.data?.code}] ${res.data?.msg}`);
+      lastError = new Error(`Tuya [code ${res.data?.code}] : ${res.data?.msg}`);
     } catch (err) {
       lastError = err;
     }
   }
 
-  throw lastError || new Error("Aucun code de commande Tuya compatible.");
+  throw lastError || new Error(`Aucun code compatible pour l'appareil ${deviceId}`);
 }
 
 async function controlGoveeDevice(deviceName, turnOn) {
@@ -199,8 +196,6 @@ function connectWebSocket() {
     try {
       const msg = JSON.parse(data);
       if (!msg.method) return;
-      
-      console.log(`Message reçu de Xiaozhi: ${msg.method}`);
 
       if (msg.method === "ping") {
         ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: {} }));
@@ -263,48 +258,50 @@ function connectWebSocket() {
         console.log(`Ordre reçu pour '${rawDevice}' -> ${isTurnOn ? 'ON' : 'OFF'}`);
 
         try {
-          // ROUTINE 1 : RÉVEIL
+          // ROUTINE 1 : RÉVEIL (Allume TV & Cuisine, éteint la prise lumière chambre)
           if (cleanName.includes("reveil") || cleanName.includes("reveille")) {
-            try { await controlTuyaDevice(TUYA_DEVICES["tele"], true); } catch(e){}
-            try { await controlGoveeDevice("cuisine", true); } catch(e){}
+            try { await controlTuyaDevice(TUYA_DEVICES["tele"], true); } catch(e){ console.error("Erreur Télé réveil :", e.message); }
+            try { await controlGoveeDevice("cuisine", true); } catch(e){ console.error("Erreur Cuisine réveil :", e.message); }
+            try { await controlTuyaDevice(TUYA_DEVICES["chevet"], false); } catch(e){ console.error("Erreur Prise lumière chambre réveil :", e.message); }
             ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "Routine réveil exécutée" }] } }));
             return;
           }
 
-          // ROUTINE 2 : DODO
+          // ROUTINE 2 : DODO (Éteint TV, Néon, Spot, Cuisine et allume la prise lumière chambre)
           if (cleanName.includes("dodo") || cleanName.includes("bonne nuit")) {
-            try { await controlTuyaDevice(TUYA_DEVICES["tele"], false); } catch(e){}
-            try { await controlTuyaDevice(TUYA_DEVICES["neon"], false); } catch(e){}
-            try { await controlGoveeDevice("spot", false); } catch(e){}
-            try { await controlGoveeDevice("cuisine", false); } catch(e){}
-            try { await controlTuyaDevice(TUYA_DEVICES["chevet"], true); } catch(e){}
+            try { await controlTuyaDevice(TUYA_DEVICES["tele"], false); } catch(e){ console.error("Erreur Télé dodo :", e.message); }
+            try { await controlTuyaDevice(TUYA_DEVICES["neon"], false); } catch(e){ console.error("Erreur Néon dodo :", e.message); }
+            try { await controlGoveeDevice("spot", false); } catch(e){ console.error("Erreur Spot dodo :", e.message); }
+            try { await controlGoveeDevice("cuisine", false); } catch(e){ console.error("Erreur Cuisine dodo :", e.message); }
+            try { await controlTuyaDevice(TUYA_DEVICES["chevet"], true); } catch(e){ console.error("Erreur Prise lumière chambre dodo :", e.message); }
+
             ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "Routine dodo exécutée" }] } }));
             return;
           }
 
           let matched = "";
 
-          // Routage vers GOVEE (couloir, cuisine, spot, led)
+          // Routage vers GOVEE
           if (cleanName.includes("couloir") || cleanName.includes("cuisine") || cleanName.includes("spot") || cleanName.includes("led") || cleanName.includes("govee")) {
             matched = await controlGoveeDevice(rawDevice, isTurnOn);
             ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: `Govee '${matched}' OK` }] } }));
             return;
           }
 
-          // Routage vers TUYA / SmartLife (via nom exact ou mot-clé)
+          // Routage vers TUYA / SmartLife
           const tuyaId = findTuyaDeviceId(cleanName);
           if (tuyaId) {
             await controlTuyaDevice(tuyaId, isTurnOn);
-            ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: `Tuya/SmartLife '${rawDevice}' OK` }] } }));
+            ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: `Tuya '${rawDevice}' OK` }] } }));
             return;
           }
 
-          // Fallback vers Govee au cas où
+          // Fallback Govee
           matched = await controlGoveeDevice(rawDevice, isTurnOn);
           ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: `Govee '${matched}' OK` }] } }));
 
         } catch (err) {
-          console.error("Erreur commande :", err.message);
+          console.error("Erreur commande globale :", err.message);
           ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: `Erreur: ${err.message}` }], isError: true } }));
         }
       }
