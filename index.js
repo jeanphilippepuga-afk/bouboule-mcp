@@ -23,13 +23,15 @@ const TUYA_DEVICES = {
   "neon": "bfe70cfada2d079843d2sm",
   "ruban": "bfe70cfada2d079843d2sm",
   "chevet": "bf1b805315f5430c95jiip",
-  "tele": "bf40d05c8117f4c375vtzq",
-  "télé": "bf40d05c8117f4c375vtzq",
+  "tele": "bfff3c709b433af741t9dz",
+  "télé": "bfff3c709b433af741t9dz",
+  "tv": "bfff3c709b433af741t9dz",
+  "television": "bfff3c709b433af741t9dz",
+  "télévision": "bfff3c709b433af741t9dz",
   "ampli": "bf82a30da98f6ed985xy80",
   "ventilateur chambre": "bf6cedea4ebc7d8f5eh9di",
   "ventilateur salon": "bf09710e9bb5de233dfltn",
   "ventilateur": "bf09710e9bb5de233dfltn",
-  "television": "bfff3c709b433af741t9dz",
   "informatique": "bf5406yyctvuikg1",
   "pc": "bf5406yyctvuikg1"
 };
@@ -195,7 +197,7 @@ function connectWebSocket() {
             tools: [
               {
                 name: "control_device",
-                description: "Contrôle les appareils domotiques (ex: neon salon, led salon, lumiere couloir, spot cuisine, musique, ventilateur, tele, chevet). Indiquer l'appareil et 'on' ou 'off'.",
+                description: "Contrôle les appareils domotiques (ex: neon salon, led salon, lumiere couloir, spot cuisine, musique, ventilateur, tele, television, chevet). Indiquer l'appareil et 'on' ou 'off'.",
                 inputSchema: {
                   type: "object",
                   properties: {
